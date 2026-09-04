@@ -1,0 +1,14 @@
+# Ignore everything
+*
+
+# Keep directories
+!*/
+
+# Keep Python files
+!*.py
+
+# Keep Qt Designer files
+!*.ui
+
+# Keep .gitignore
+!.gitignore
