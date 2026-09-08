@@ -4,6 +4,7 @@
 # Keep directories
 !*/
 
+
 # Keep Python files
 !*.py
 
@@ -12,3 +13,32 @@
 
 # Keep .gitignore
 !.gitignore
+
+
+# --------------------------------------------------
+# Deployment / Python runtime - DO NOT COMMIT
+# --------------------------------------------------
+
+Python/
+.venv/
+
+# --------------------------------------------------
+# Credentials / authentication - DO NOT COMMIT
+# --------------------------------------------------
+
+credentials.json
+sheetstoken.json
+drivetoken.json
+
+# --------------------------------------------------
+# Runtime-generated files - DO NOT COMMIT
+# --------------------------------------------------
+
+debug.log
+saved_batches.txt
+temp_test_sheet.pdf
+annotated_temp_test_sheet.pdf
+
+# Python cache
+__pycache__/
+*.pyc

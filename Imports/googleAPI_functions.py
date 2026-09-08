@@ -102,7 +102,7 @@ def get_test_data(sheetID,sheet_name,value_range):
                 print(e)
                 return e
            
-def write_to_ssf(batch_data,test_data, ssf_sheetID, test_log_sheetID, row_num=11):
+def write_to_ssf(batch_data,test_data, ssf_sheetID, test_log_sheetID, row_num=11,blank = False):
     batchID = batch_data.batchID
     if test_data.skip:
        return "SKIPPED"
@@ -160,7 +160,7 @@ def write_to_ssf(batch_data,test_data, ssf_sheetID, test_log_sheetID, row_num=11
           .execute()
       )
       print(f"{(result.get('totalUpdatedCells'))} cells updated.")
-      update_test_log(batch_data,test_data,test_log_sheetID)
+      if not blank: update_test_log(batch_data,test_data,test_log_sheetID)
       return result
     except HttpError as error:
       print(f"An error occurred: {error}")

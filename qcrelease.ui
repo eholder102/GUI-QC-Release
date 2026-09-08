@@ -296,7 +296,7 @@
         <item row="2" column="1">
          <widget class="QLabel" name="label_2">
           <property name="text">
-           <string>*CURRENTLY BROKEN*</string>
+           <string>(IN DEVELOPMENT)</string>
           </property>
          </widget>
         </item>

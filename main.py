@@ -3,9 +3,12 @@ import math
 from time import time as t
 import time as tt
 import re
+import os
+import subprocess
 
 #GUI
 from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QMessageBox, QPushButton, QInputDialog
+from PyQt5.QtGui import QIcon
 from PyQt5.QtCore import QThread, pyqtSignal, QObject
 from qcrelease import Ui_QCRelease
 
@@ -26,6 +29,10 @@ from reportlab.lib.units import inch
 from reportlab.pdfgen.canvas import Canvas
 from pypdf import PdfReader, PdfWriter
 import pyperclip
+
+from pathlib import Path
+
+APP_DIR = Path(__file__).resolve().parent
 #my_path_to_label_opener = "C:/Program Files/Google/Chrome/Application/chrome.exe"
 def create_config():
     config = configparser.ConfigParser()
@@ -56,7 +63,7 @@ def read_config():
 
     # Read the configuration file
     try:
-        with open('config.ini') as f:
+        with open(APP_DIR / 'config.ini') as f:
             config.read_file(f)
     except Exception as e:
        logger.error(e)
@@ -142,7 +149,7 @@ class search_sheet_worker(QObject):
      for page in reader.pages[1:]:
          writer.add_page(page)
 
-     with open("annotated_temp_test_sheet.pdf", "wb") as f:
+     with open(APP_DIR / "annotated_temp_test_sheet.pdf", "wb") as f:
          writer.write(f)
      open_test_data_sheet(self.configs['annotated_temp_test_sheet'])
      self.progress.emit(100)
@@ -173,7 +180,7 @@ class search_sheet_worker(QObject):
         # The file token.json stores the user's access and refresh tokens, and is
         # created automatically when the authorization flow completes for the first
         # time.
-        if os.path.exists("drivetoken.json"):
+        if os.path.exists(APP_DIR / "drivetoken.json"):
             creds = Credentials.from_authorized_user_file("drivetoken.json", SCOPES)
         # If there are no (valid) credentials available, let the user log in.
         if not creds or not creds.valid:
@@ -185,7 +192,7 @@ class search_sheet_worker(QObject):
             )
              creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
-            with open("drivetoken.json", "w") as token:
+            with open(APP_DIR / "drivetoken.json", "w") as token:
              token.write(creds.to_json())
              self.progress.emit(10)
         try:
@@ -270,7 +277,7 @@ class search_sheet_worker(QObject):
                     
                         file.seek(0)
                         
-                        with open(self.configs['temp_test_sheet'],'wb') as f:
+                        with open(APP_DIR / self.configs['temp_test_sheet'],'wb') as f:
                             shutil.copyfileobj(file, f)
                         found = 1
                         if self.annotate:
@@ -311,11 +318,23 @@ class labels_thread(QThread):
         
 
     def run(self):
-        if self.configs["path_to_label_opener"] == "Default":
-            subprocess.run(self.filename, shell=True)
-        else:
-            cwd = os.getcwd()
-            subprocess.run("\"" + self.configs['path_to_label_opener'] + "\" " + "\" " + cwd + "/" + self.filename + "\"", shell=True)
+        try:
+            label_path = APP_DIR / self.filename
+            logger.info("Attempting to open label: %s", label_path)
+            logger.info("Label exists: %s", label_path.exists())
+            if self.configs["path_to_label_opener"] == "Default":
+                os.startfile(str(label_path))
+            else:
+                subprocess.run(
+                    [
+                        self.configs["path_to_label_opener"],
+                        str(label_path)
+                    ],
+                    shell=True
+                )
+
+        except Exception:
+            logger.exception("ERROR IN LABELS THREAD")
 
 class MyApp(QMainWindow, Ui_QCRelease):
 
@@ -380,7 +399,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
     def write_batch_to_file(self):
        try:
           
-        with open("saved_batches.txt", "a") as f:
+        with open(APP_DIR / "saved_batches.txt", "a") as f:
           f.write(','.join(self.most_recent_request.list_form()))
           f.write("\n")
        except Exception as e:
@@ -415,8 +434,8 @@ class MyApp(QMainWindow, Ui_QCRelease):
       # The file token.json stores the user's access and refresh tokens, and is
       # created automatically when the authorization flow completes for the first
       # time.
-        if os.path.exists("sheetstoken.json"):
-            creds = Credentials.from_authorized_user_file("sheetstoken.json", SCOPES)
+        if os.path.exists(APP_DIR / "sheetstoken.json"):
+            creds = Credentials.from_authorized_user_file(APP_DIR / "sheetstoken.json", SCOPES)
       # If there are no (valid) credentials available, let the user log in.
         if not creds or not creds.valid:
          if creds and creds.expired and creds.refresh_token:
@@ -427,7 +446,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
           )
           creds = flow.run_local_server(port=0)
         # Save the credentials for the next run
-        with open("sheetstoken.json", "w") as token:
+        with open(APP_DIR / "sheetstoken.json", "w") as token:
           token.write(creds.to_json())
         try:
             service = build("sheets", "v4", credentials=creds)
@@ -621,8 +640,11 @@ class MyApp(QMainWindow, Ui_QCRelease):
         zeroless_date = convert_between_date_formats(strip_date_zeros(date))
         try:
             for entry in sheetData['values']:
+             try:
                 row += 1
+                
                 if entry[0] == batchID and type_material != 'L':
+                    
                     raw_material_info = entry
                     break   
                 
@@ -631,9 +653,12 @@ class MyApp(QMainWindow, Ui_QCRelease):
                       if entry[0] == zeroless_date and entry[3] == batchID:
                           raw_material_info = entry
                           break
-                
-        except: 
+             except IndexError:
+              logger.exception("FATAL APPLICATION ERROR")
+              continue        
+        except Exception: 
             logger.debug("Sheet Data could not be accessed")
+            logger.exception("FATAL APPLICATION ERROR")
             return 0
         match type_material:
                    case 'R': #raw material
@@ -858,7 +883,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                     self.create_labels_label.setText("Labels created in " + filename + '\n' + "WARNING: " + batch_data.num_of_containers + " LABELS REQUESTED. ASK FOR CLARITY.")
                 if self.timestamp:
                     batch_data.row = row_num = str(int(batch_data.batchID[4] + batch_data.batchID[5] + batch_data.batchID[6]) + 1)
-                    timestamp_sample(self.configs['Component_check_in_sheet_ID'],batch_data.row)
+                    timestamp_sample(self.configs['component_check_in_sheet_ID'],batch_data.row)
                     self.timestamp_label.setText("Sample Timestamped")
             case 'L':
                 filename = self.create_labels_labels(batch_data) 
@@ -872,6 +897,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
             case _: 
                 self.create_labels_label.setText("Error in creating labels")
                 return
+        
         self.labelsthread.filename = filename
         self.labelsthread.configs = self.configs
         self.labelsthread.start()
@@ -895,10 +921,13 @@ class MyApp(QMainWindow, Ui_QCRelease):
             self.show_error("NO BATCH ID PROVIDED")
             return
         if len(batchID) < 7 or (len(batchID) > 7 and len(batchID) < 9):
-            self.batches_searched.append([batchID + " ", "FAILED TO FIND"])
-            self.progressBar.setValue(0)
-            self.recent_data_label.setText("Could not find batch data")
-            logger.warning("Could not find batch data")
+            try:
+               self.batches_searched.append([batchID + " ", "FAILED TO FIND"])
+               self.progressBar.setValue(0)
+               self.recent_data_label.setText("Could not find batch data")
+               logger.warning("Could not find batch data")
+            except Exception:
+                logger.exception("FATAL APPLICATION ERROR")
             return
         if len(batchID) >= 9:
             type_material = 'L'
@@ -962,8 +991,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
         self.progressBar.setValue(100)
         
     def search_sheet_clicked(self):
-       if not self.batchIDinput:
-          self.display_clicked()
+       if not self.batchIDinput:self.display_clicked()
         #this multithreading mess should move all the searching, annotating, and opening of a test sheet into another thread
        self.search_sheet_worker = search_sheet_worker()
        self.search_sheet_worker.configs = self.configs
@@ -993,10 +1021,14 @@ class MyApp(QMainWindow, Ui_QCRelease):
        self.search_sheet_clicked()
        self.create_labels_clicked()
     def tustinbuttonclicked(self):
+       dummy_batch = raw_material_data("","","","","","","","","","")
+       dummy_test_data = td("","","","","","","","","")
+       for i in range(8): #erase previous SSF entries
+        write_to_ssf(dummy_batch,dummy_test_data,self.configs["ssf_sheet_ID"],self.configs["testing_log_sheet_ID"],11+i,blank=True)
        i = 0
        self.tustinbar.setValue(0)
        progress_chunk = 100/8
-       for entry in self.to_be_tested:
+       for entry in self.to_be_tested.copy():
           if i > 7:
              return
           batch = list_form_to_class_form(entry)
@@ -1006,6 +1038,8 @@ class MyApp(QMainWindow, Ui_QCRelease):
               self.tests_requested.append([batch.batchID + " " + batch.ingredientID + " ", "TEST SKIPPED DUE TO LOT DUPLICATION"])
               logger.info("BATCH ID: " + batch.batchID + " SKIPPED DUE TO LOT DUPLICATION")
               self.show_error("BATCH ID: " + batch.batchID + " SKIPPED DUE TO LOT DUPLICATION")
+              self.remove_test_item(self.to_be_tested.index(entry))
+              self.update_test_table()
               continue
           if data == 0:
              data = td(ingredientID=batch.ingredientID,ingredient_name=batch.ingredient_name,heavy_metals=True,routine_micros=True,standard_request="",standard_price="",skip=False)
@@ -1014,6 +1048,8 @@ class MyApp(QMainWindow, Ui_QCRelease):
               logger.info("BATCH ID: " + batch.batchID + " SKIPPED")
               self.tests_requested.append([batch.batchID + " " + batch.ingredientID + " ", "TEST SKIPPED DUE TO SLE STATUS"])
               self.show_error("BATCH ID: " + batch.batchID + " SKIPPED DUE TO SLE STATUS")
+              self.remove_test_item(self.to_be_tested.index(entry))
+              self.update_test_table()
               continue
           self.tustinbar.setValue(math.floor(progress))
           i+=1
@@ -1034,6 +1070,8 @@ class MyApp(QMainWindow, Ui_QCRelease):
           else:
              self.tests_requested.append([batch.batchID + " " + batch.ingredientID + " ", "NO HEAVY METALS REQUESTED"])
           self.total_price_of_tests += int(price)
+          self.remove_test_item(self.to_be_tested.index(entry))
+          self.update_test_table()
        self.tustinbar.setValue(100)
        
     def kill_search_thread(self,complete,id,error):
@@ -1049,7 +1087,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
             message
         )
           
-          
+        
     
     
 
@@ -1063,7 +1101,7 @@ if __name__ == "__main__":
     logger.info(config)
     try:
         app = QApplication(sys.argv)
-
+        app.setWindowIcon(QIcon(str(APP_DIR / "jetpack_icon.ico")))
         window = MyApp()
         window.configs = config
         window.show()
@@ -1071,5 +1109,7 @@ if __name__ == "__main__":
         sys.exit(app.exec_())
     except Exception as e:
         logger.error(e)
-        window.show_error(e)
+        logger.exception("FATAL APPLICATION ERROR")
         sys.exit(app.exec_())
+        raise
+        

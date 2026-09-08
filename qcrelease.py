@@ -188,7 +188,7 @@ class Ui_QCRelease(object):
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.release_tab), _translate("QCRelease", "Release"))
         self.tustinbutton.setText(_translate("QCRelease", "Generate Test Sheet (Tustin)"))
         self.pushButton_2.setText(_translate("QCRelease", "Generate Test Sheet (Burbank)"))
-        self.label_2.setText(_translate("QCRelease", "*CURRENTLY BROKEN*"))
+        self.label_2.setText(_translate("QCRelease", "(IN DEVELOPMENT)"))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.testing_tab), _translate("QCRelease", "Testing"))
 
 
