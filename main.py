@@ -5,11 +5,12 @@ import time as tt
 import re
 import os
 import subprocess
+import json
 
 #GUI
 from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QMessageBox, QPushButton, QInputDialog
 from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import QThread, pyqtSignal, QObject
+from PyQt5.QtCore import QThread, pyqtSignal, QObject,QTimer
 from qcrelease import Ui_QCRelease
 
 #graceful handling
@@ -32,6 +33,7 @@ import pyperclip
 
 from pathlib import Path
 
+APP_VERSION = "1.0.3"
 APP_DIR = Path(__file__).resolve().parent
 #my_path_to_label_opener = "C:/Program Files/Google/Chrome/Application/chrome.exe"
 def create_config():
@@ -102,7 +104,52 @@ def read_config():
     }
 
     return config_values
+def check_for_updates():
+    try:
+        subprocess.Popen(
+            [
+                str(APP_DIR / "Python" / "pythonw.exe"),
+                str(APP_DIR / "update.py"),
+                APP_VERSION,
+                str(os.getpid())
+            ],
+            cwd=str(APP_DIR)
+        )
 
+        logger.info("Started update checker")
+
+    except Exception:
+        logger.exception("Could not start update checker")
+def start_update_install(version, zip_path, temp_dir):
+    try:
+        logger.info(
+            "Starting installation of update %s",
+            version
+        )
+
+        subprocess.Popen(
+            [
+                str(APP_DIR / "Python" / "pythonw.exe"),
+                str(APP_DIR / "update.py"),
+                APP_VERSION,
+                "--install",
+                str(zip_path),
+                str(temp_dir),
+                str(os.getpid())
+            ],
+            cwd=str(APP_DIR)
+        )
+
+        logger.info("Update installer process started")
+
+        return True
+
+    except Exception:
+        logger.exception(
+            "Could not start update installer"
+        )
+
+        return False
 class search_sheet_worker(QObject):
    progress = pyqtSignal(int)
    complete = pyqtSignal(int,str,str)
@@ -386,6 +433,81 @@ class MyApp(QMainWindow, Ui_QCRelease):
         self.tustinbutton.clicked.connect(self.tustinbuttonclicked)
         self.labelsthread = labels_thread()
 
+    def check_update_ready(self):
+        update_file = APP_DIR / "update_ready.json"
+
+        if not update_file.exists():
+            return
+
+        try:
+            with open(
+                update_file,
+                "r",
+                encoding="utf-8"
+            ) as file:
+                update_info = json.load(file)
+
+            version = update_info["version"]
+            zip_path = update_info["zip_path"]
+            temp_dir = update_info["temp_dir"]
+
+            logger.info(
+                "Update ready to install: %s",
+                version
+            )
+
+            reply = QMessageBox.question(
+                self,
+                "QC Release Update",
+                f"Version {version} is available.\n\n"
+                "Would you like to update now?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+
+            if reply == QMessageBox.Yes:
+
+                if start_update_install(
+                    version,
+                    zip_path,
+                    temp_dir
+                ):
+
+                    logger.info(
+                        "User accepted update %s",
+                        version
+                    )
+
+                    # Remove the notification file so it
+                    # isn't detected again.
+                    try:
+                        update_file.unlink()
+                    except Exception:
+                        logger.exception(
+                            "Could not remove update_ready.json"
+                        )
+
+                    # This triggers your normal closeEvent().
+                    QApplication.quit()
+
+            else:
+
+                logger.info(
+                    "User declined update %s",
+                    version
+                )
+
+                try:
+                    update_file.unlink()
+                except Exception:
+                    logger.exception(
+                        "Could not remove update_ready.json"
+                    )
+
+        except Exception:
+            logger.exception(
+                "Error processing available update"
+            )
         
         
     def closeEvent(self, a0):
@@ -406,7 +528,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
           logger.error(e)
           logger.error("FAILED TO WRITE TO SAVED BATCHES")
           return
-       logger.info("Saved batch ID " + self.most_recent_request.batchID + "in saved batches")
+       logger.info("Saved batch ID " + self.most_recent_request.batchID + " in saved batches")
        return
           
         
@@ -1021,18 +1143,21 @@ class MyApp(QMainWindow, Ui_QCRelease):
        self.search_sheet_clicked()
        self.create_labels_clicked()
     def tustinbuttonclicked(self):
+       self.tustinbar.setValue(0)
+       progress_chunk = 50/8
        dummy_batch = raw_material_data("","","","","","","","","","")
        dummy_test_data = td("","","","","","","","","")
        for i in range(8): #erase previous SSF entries
+        progress = (i+1)*progress_chunk
         write_to_ssf(dummy_batch,dummy_test_data,self.configs["ssf_sheet_ID"],self.configs["testing_log_sheet_ID"],11+i,blank=True)
+        self.tustinbar.setValue(math.floor(progress))
        i = 0
-       self.tustinbar.setValue(0)
-       progress_chunk = 100/8
+       self.tustinbar.setValue(50)
        for entry in self.to_be_tested.copy():
           if i > 7:
              return
           batch = list_form_to_class_form(entry)
-          progress = (i+1)*progress_chunk
+          progress = 50+(i+1)*progress_chunk
           data = self.search_test_data(batch)
           if yes_no_to_bool(batch.is_duplicate_lot):
               self.tests_requested.append([batch.batchID + " " + batch.ingredientID + " ", "TEST SKIPPED DUE TO LOT DUPLICATION"])
@@ -1099,13 +1224,17 @@ if __name__ == "__main__":
     logger.debug('\n' + "--APPLICATION LAUNCHED AT " + str(datetime.now()) + "--" + '\n')
     config = read_config()
     logger.info(config)
+    logger.info("QC Release 1.0.3 update test")
     try:
         app = QApplication(sys.argv)
         app.setWindowIcon(QIcon(str(APP_DIR / "jetpack_icon.ico")))
         window = MyApp()
         window.configs = config
         window.show()
-
+        check_for_updates()
+        update_timer = QTimer()
+        update_timer.timeout.connect(window.check_update_ready)
+        update_timer.start(1000)
         sys.exit(app.exec_())
     except Exception as e:
         logger.error(e)
