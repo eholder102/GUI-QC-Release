@@ -65,6 +65,7 @@ def timestamp_sample(
     return error
 
 
+
 def get_test_data(sheetID,sheet_name,value_range):
            creds = None
          # The file token.json stores the user's access and refresh tokens, and is
@@ -291,6 +292,42 @@ def update_test_log(batch_data, test_data, sheetID):
            .execute() 
       )
       print(f"{(result.get('totalUpdatedCells'))} cells updated.")
+      return result
+    except HttpError as error:
+      print(f"An error occurred: {error}")
+      return error
+
+def cache_test_log(sheetID):
+
+    range_name = "2026 Raw Material Testing"
+    creds = None
+    if os.path.exists("sheetstoken.json"):
+        creds = Credentials.from_authorized_user_file("sheetstoken.json", SCOPES)
+      # If there are no (valid) credentials available, let the user log in.
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+          creds.refresh(Request())
+        else:
+          flow = InstalledAppFlow.from_client_secrets_file(
+              "credentials.json", SCOPES
+          )
+          creds = flow.run_local_server(port=0)
+        # Save the credentials for the next run
+        with open("sheetstoken.json", "w") as token:
+          token.write(creds.to_json())
+    
+    # pylint: disable=maybe-no-member
+    
+    try:
+      service = build("sheets", "v4", credentials=creds)
+      sheet = service.spreadsheets()
+      
+      result = (
+          sheet.values()
+          .get(spreadsheetId=sheetID, range='2026 Raw Material Testing!A:H')
+          .execute()
+      )
+    
       return result
     except HttpError as error:
       print(f"An error occurred: {error}")

@@ -38,13 +38,19 @@ def strip_date_zeros(date):
    return newdate
 
 def convert_between_date_formats(date):
-   newdate = ""
-   i = 0
-   for digit in date:
-       if digit == '-':
-           newdate += '/'
-       else: newdate += str(digit)
-   return newdate
+    try:
+        date = date.replace('-', '/')
+
+        try:
+            dt = datetime.strptime(date, "%m/%d/%Y")
+        except ValueError:
+            dt = datetime.strptime(date, "%m/%d/%y")
+
+        return dt.strftime("%m/%d/%Y")
+
+    except:
+        
+        return date
 
 def skip_value_by_column(column):
     test_columns = [6,9,13,18]

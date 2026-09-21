@@ -6,19 +6,26 @@ import re
 import os
 import subprocess
 import json
+from datetime import datetime, timedelta
 
 #GUI
-from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QMessageBox, QPushButton, QInputDialog
+from PyQt5 import QtWidgets
+from PyQt5.QtWidgets import QApplication, QMainWindow, QTableWidget, QTableWidgetItem, QMessageBox, QPushButton, QInputDialog, QFileDialog
 from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import QThread, pyqtSignal, QObject,QTimer
+from PyQt5.QtCore import QThread, pyqtSignal, QObject,QTimer,QDate
 from qcrelease import Ui_QCRelease
 
 #graceful handling
 import configparser
 import logging
 
-#TODO:  implement SSF generation(get test and specs also allow deletion from testing table), check for more errors, scroll properly,fix resize lag issue, FIX SKIP VALUE DETERMINATION
-#TODO: create master sheet of ingredients w/ tests run and price
+#timed reports
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+matplotlib.use("Agg")
+
+
 #imports
 from Imports.material_data import material_data as raw_material_data
 from Imports.material_data import run_report
@@ -30,10 +37,23 @@ from reportlab.lib.units import inch
 from reportlab.pdfgen.canvas import Canvas
 from pypdf import PdfReader, PdfWriter
 import pyperclip
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    PageBreak,
+    Image
+)
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 from pathlib import Path
 
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.2.2"
 APP_DIR = Path(__file__).resolve().parent
 #my_path_to_label_opener = "C:/Program Files/Google/Chrome/Application/chrome.exe"
 def create_config():
@@ -318,7 +338,7 @@ class search_sheet_worker(QObject):
                         done = False
                         while done is False:
                             status, done = downloader.next_chunk()
-                            print(status)
+                            logger.info(status)
                             progress += 1
                             if progress < 90: self.progress.emit(progress)
                     
@@ -354,7 +374,125 @@ class search_sheet_worker(QObject):
             logger.error("COULD NOT FIND TEST SHEET")
             self.complete.emit(1,"NONE", "FAILED TO FIND TEST SHEET")
             return
-        
+
+from PyQt5.QtCore import QThread, pyqtSignal
+
+
+class ReportWorker(QThread):
+
+    progress = pyqtSignal(int)
+    finished = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def __init__(
+        self,
+        selected_time,
+        pivot_date,
+        skip_data,
+        test_data,
+        check_in_data,
+        month,
+        sheetID,
+        overall_sle_data,
+        output_path,
+        sle_changes
+    ):
+        super().__init__()
+
+        self.selected_time = selected_time
+        self.pivot_date = pivot_date
+        self.skip_data = skip_data
+        self.test_data = test_data
+        self.check_in_data = check_in_data
+        self.month = month
+        self.sheetID = sheetID
+        self.overall_sle_data = overall_sle_data
+        self.output_path = output_path
+        self.sle_changes = sle_changes
+
+    def run(self):
+
+        try:
+
+            self.progress.emit(0)
+
+            # -----------------------------
+            # CREATE REPORT DATA
+            # -----------------------------
+
+            r = timed_report(
+                self.selected_time,
+                self.pivot_date,
+                self.skip_data,
+                self.test_data,
+                self.sle_changes
+            )
+
+            self.progress.emit(10)
+            #r.get_top_25_sle()
+            self.progress.emit(20)
+            r.get_incoming(
+                self.check_in_data,
+                self.month
+            )
+            if r.selected_time == "ytd":
+                months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+                
+                month_num = int(self.pivot_date[0:2])
+                for i in range(month_num):
+                    month = months[i]
+                    year = self.pivot_date[6:10]
+                    date_string = month + " " + year
+                    month_year = date_string.upper()
+                    r.get_incoming(self.check_in_data,
+                                    month_year)
+            self.progress.emit(30)
+
+            r.get_test_log(
+                self.sheetID
+            )
+
+            self.progress.emit(50)
+
+            r.get_overall_sle(
+                self.overall_sle_data
+            )
+
+            self.progress.emit(60)
+
+            r.print_values()
+
+            self.progress.emit(70)
+
+            # -----------------------------
+            # CREATE PDF
+            # -----------------------------
+
+            pdf = PDFReport(
+                r,
+                self.output_path,
+                r.selected_time
+                
+            )
+
+            pdf.create_pdf()
+
+            self.progress.emit(100)
+
+            self.finished.emit(str(self.output_path))
+
+        except Exception as e:
+
+            logger.exception("Error creating report")
+
+            self.error.emit(str(e))
+
+    def pdf_progress(self, value):
+
+        # PDF is 70-100% of total operation
+        overall_progress = 70 + int(value * 0.30)
+
+        self.progress.emit(overall_progress)     
 
 class labels_thread(QThread):
     result_ready = pyqtSignal(int)
@@ -382,7 +520,1167 @@ class labels_thread(QThread):
 
         except Exception:
             logger.exception("ERROR IN LABELS THREAD")
+class PDFReport:
+    selected_time = "week"
+    selected_time_ly = "Weekly"
 
+    def time_to_timely(self):
+       match (self.selected_time):
+          case "day":
+             self.selected_time_ly = "Daily"
+          case "week":
+             self.selected_time_ly = "Weekly"
+          case "month":
+             self.selected_time_ly = "Monthly"
+          case "ytd":
+            self.selected_time = "year"
+            self.selected_time_ly = "Yearly"
+          case _:
+             self.selected_time_ly = "N/A"
+
+    def __init__(self, report, output_path,selected_time):
+        """
+        report      = completed timed_report object
+        output_path = location where the PDF should be created
+        """
+        self.selected_time = selected_time
+        self.time_to_timely()
+        self.report = report
+        self.output_path = Path(output_path)
+
+        # Folder for temporary chart images
+        self.chart_folder = self.output_path.parent / "report_charts"
+        self.chart_folder.mkdir(exist_ok=True)
+
+        self.styles = getSampleStyleSheet()
+
+        self.title_style = ParagraphStyle(
+            "ReportTitle",
+            parent=self.styles["Title"],
+            fontSize=18,
+            leading=22,
+            alignment=TA_CENTER,
+            spaceAfter=12
+        )
+
+        self.section_style = ParagraphStyle(
+            "Section",
+            parent=self.styles["Heading1"],
+            fontSize=14,
+            leading=18,
+            spaceBefore=10,
+            spaceAfter=8
+        )
+
+        self.subsection_style = ParagraphStyle(
+            "Subsection",
+            parent=self.styles["Heading2"],
+            fontSize=11,
+            leading=14,
+            spaceBefore=8,
+            spaceAfter=5
+        )
+
+        self.normal_style = ParagraphStyle(
+            "NormalReport",
+            parent=self.styles["Normal"],
+            fontSize=9,
+            leading=12
+        )
+
+        self.story = []
+
+    # ---------------------------------------------------------
+    # MAIN PDF CREATION
+    # ---------------------------------------------------------
+
+    def create_pdf(self):
+        """
+        Creates the complete PDF report.
+        """
+
+        doc = SimpleDocTemplate(
+            str(self.output_path),
+            pagesize=letter,
+            rightMargin=0.55 * inch,
+            leftMargin=0.55 * inch,
+            topMargin=0.55 * inch,
+            bottomMargin=0.55 * inch
+        )
+
+        self.story = []
+
+        self.add_summary_page()
+        self.story.append(PageBreak())
+
+        self.add_skip_progress_page()
+        #self.story.append(PageBreak())
+
+        self.add_sle_changes_page()
+        self.story.append(PageBreak())
+
+        self.add_top_25_page()
+
+        doc.build(
+            self.story,
+            onFirstPage=self.add_page_number,
+            onLaterPages=self.add_page_number
+        )
+
+        self.cleanup_charts()
+
+        return str(self.output_path)
+
+    # ---------------------------------------------------------
+    # PAGE NUMBER
+    # ---------------------------------------------------------
+
+    def add_page_number(self, canvas, doc):
+        canvas.saveState()
+
+        canvas.setFont("Helvetica", 8)
+
+        canvas.drawRightString(
+            letter[0] - 0.55 * inch,
+            0.3 * inch,
+            f"Page {doc.page}"
+        )
+
+        canvas.restoreState()
+
+    # ---------------------------------------------------------
+    # PAGE 1
+    # ---------------------------------------------------------
+
+    def add_summary_page(self):
+
+        start_date, end_date = self.get_report_dates()
+
+        self.story.append(
+            Paragraph(
+                f"RM QC Report for the {self.selected_time} of {start_date}",
+                self.title_style
+            )
+        )
+
+        self.story.append(Spacer(1, 0.15 * inch))
+
+        self.story.append(
+            Paragraph(
+                f"{self.selected_time_ly} Summary",
+                self.section_style
+            )
+        )
+
+        incoming = len(self.report.incoming['values'])
+        duplicates = len(self.report.duplicate_lots)
+        skips = len(self.report.sle_skips)
+
+        tested = incoming - duplicates - skips
+
+        summary_data = [
+            ["Metric", "Value"],
+            ["Incoming ingredients", str(incoming)],
+            ["Duplicates", str(duplicates)],
+            ["SLE skips", str(skips)],
+            ["Tested", str(tested)],
+            [
+                "Estimated total cost of tests",
+                f"${self.report.total_cost:,.2f}"
+            ]
+        ]
+
+        self.story.append(
+            self.make_table(
+                summary_data,
+                widths=[4.5 * inch, 2.0 * inch]
+            )
+        )
+
+        self.story.append(Spacer(1, 0.25 * inch))
+
+        self.story.append(
+            Paragraph(
+                "Testing Breakdown",
+                self.section_style
+            )
+        )
+
+        chart_path = self.create_testing_pie_chart(
+            tested,
+            skips,
+            duplicates
+        )
+
+        self.story.append(
+            Image(
+                str(chart_path),
+                width=5.0 * inch,
+                height=3.5 * inch
+            )
+        )
+
+    # ---------------------------------------------------------
+    # PAGE 2
+    # ---------------------------------------------------------
+
+    def add_skip_progress_page(self):
+
+        self.story.append(
+            Paragraph(
+                "Skip Lot Progress",
+                self.title_style
+            )
+        )
+
+        self.story.append(
+            Paragraph(
+                "SLE Status of Ingredients Received During the Reporting Period",
+                self.section_style
+            )
+        )
+
+        # ---------------------------------------------
+        # SLE PIE CHARTS
+        # ---------------------------------------------
+
+        weekly_chart = self.create_sle_pie_chart(
+            self.report.sle_graph_values,
+            self.report.sle_graph_labels,
+            f"{self.selected_time_ly} SLE Status"
+        )
+
+        overall_chart = self.create_sle_pie_chart(
+            self.report.overall_sle_values,
+            self.report.sle_graph_labels,
+            "Overall SLE Status"
+        )
+
+        # Create smaller images so both fit on the same page
+        weekly_image = Image(
+            str(weekly_chart),
+            width=3.1 * inch,
+            height=2.3 * inch
+        )
+
+        overall_image = Image(
+            str(overall_chart),
+            width=3.1 * inch,
+            height=2.3 * inch
+        )
+
+        # Put both charts side-by-side
+        chart_table = Table(
+            [
+                [
+                    Paragraph(
+                        f"{self.selected_time_ly} SLE Distribution",
+                        self.subsection_style
+                    ),
+                    Paragraph(
+                        "Overall SLE Status",
+                        self.subsection_style
+                    )
+                ],
+                [
+                    weekly_image,
+                    overall_image
+                ]
+            ],
+            colWidths=[3.25 * inch, 3.25 * inch]
+        )
+
+        chart_table.setStyle(
+            TableStyle([
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ])
+        )
+
+        self.story.append(chart_table)
+
+    # ---------------------------------------------------------
+    # PAGE 3
+    # ---------------------------------------------------------
+
+    def add_sle_changes_page(self):
+
+        self.story.append(
+            Paragraph(
+                "SLE Status Changes",
+                self.title_style
+            )
+        )
+
+        self.story.append(
+            Paragraph(
+                "SLE Status Changes During the Reporting Period",
+                self.section_style
+            )
+        )
+
+        if not self.report.sle_changes:
+
+            self.story.append(
+                Paragraph(
+                    "No SLE status changes were recorded during this reporting period.",
+                    self.normal_style
+                )
+            )
+
+            return
+
+        table_data = [
+            [
+                "Ingredient",
+                "Vendor",
+                "Previous SLE",
+                "New SLE"
+            ]
+        ]
+
+        for key, change in self.report.sle_changes.items():
+
+            # Key is:
+            # "INGREDIENT VENDOR"
+
+            parts = key.split(" ", 1)
+
+            ingredient = parts[0]
+            vendor = parts[1] if len(parts) > 1 else ""
+
+            table_data.append([
+                ingredient,
+                vendor,
+                str(change.get("old", "")),
+                str(change.get("new", ""))
+            ])
+
+        self.story.append(
+            self.make_table(
+                table_data,
+                widths=[
+                    1.5 * inch,
+                    2.5 * inch,
+                    1.0 * inch,
+                    1.0 * inch
+                ]
+            )
+        )
+
+    # ---------------------------------------------------------
+    # PAGE 4
+    # ---------------------------------------------------------
+
+    def add_top_25_page(self):
+
+        self.story.append(
+            Paragraph(
+                "Top 25 Ingredients",
+                self.title_style
+            )
+        )
+
+        self.story.append(
+            Paragraph(
+                "Lots Received and SLE Status",
+                self.section_style
+            )
+        )
+
+        table_data = [
+            [
+                "Ingredient",
+                "Lots Received",
+                "SLE Status"
+            ]
+        ]
+
+        for ingredient in self.report.top_25_ingredients:
+
+            data = self.report.top_25_data.get(
+                ingredient,
+                []
+            )
+
+            lot_count = len(data) - 1
+
+            # Get the SLE status from the stored data.
+            # Your current format is:
+            # [batchID, "SLE STATUS: X"]
+
+            sle_statuses = []
+
+            for entry in data:
+
+                if len(entry) >= 2:
+
+                    status = str(entry[1])
+
+                    if "SLE STATUS:" in status:
+                        status = status.replace(
+                            "SLE STATUS:",
+                            ""
+                        ).strip()
+
+                        sle_statuses.append(status)
+
+            if sle_statuses:
+
+                # Display the most recently encountered status.
+                sle_status = sle_statuses[-1]
+
+            else:
+                sle_status = "N/A"
+
+            table_data.append([
+                ingredient,
+                str(lot_count),
+                sle_status
+            ])
+
+        self.story.append(
+            self.make_table(
+                table_data,
+                widths=[
+                    3.0 * inch,
+                    1.5 * inch,
+                    1.5 * inch
+                ]
+            )
+        )
+# ---------------------------------------------------------
+# CHARTS
+# ---------------------------------------------------------
+
+    def create_testing_pie_chart(self, tested, skips, duplicates):
+
+        values = [tested, skips, duplicates]
+        logger.info(f"ACTUAL PIE VALUES: {values}")
+        labels = ["Tested", "SLE Skips", "Duplicates"]
+
+        total = sum(values)
+
+        legend_labels = [
+            f"{label} ({value / total * 100:.1f}%)" if total else f"{label} (0.0%)"
+            for label, value in zip(labels, values)
+        ]
+
+        path = self.chart_folder / "testing_breakdown.png"
+
+        fig, ax = plt.subplots(figsize=(6.5, 5))
+
+        wedges, _ = ax.pie(
+            values,
+            startangle=90,
+            counterclock=False,
+            colors=[
+                "#4C78A8",  # muted blue
+                "#F2B134",  # muted amber
+                "#D95F59"   # muted red
+            ],
+            wedgeprops={
+                "linewidth": 1.5,
+                "edgecolor": "white"
+            }
+        )
+
+        ax.legend(
+            wedges,
+            legend_labels,
+            loc="lower center",
+            bbox_to_anchor=(0.5, -0.08),
+            ncol=3,
+            frameon=False
+        )
+
+        ax.set_title(
+            "Testing Requests",
+            fontsize=14,
+            fontweight="bold",
+            pad=15
+        )
+
+        ax.axis("equal")
+
+        fig.tight_layout()
+        fig.savefig(path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
+        return path
+
+
+    def create_sle_pie_chart(self, values, labels, title):
+
+        total = sum(values)
+
+        legend_labels = [
+            f"{label} ({value / total * 100:.1f}%)" if total else f"{label} (0.0%)"
+            for label, value in zip(labels, values)
+        ]
+
+        path_name = title.lower().replace(" ", "_")
+        path = self.chart_folder / f"{path_name}.png"
+
+        fig, ax = plt.subplots(figsize=(6.5, 5))
+
+        wedges, _ = ax.pie(
+            values,
+            startangle=90,
+            counterclock=False,
+            colors=[
+                "#264653",
+                "#2A9D8F",
+                "#52B788",
+                "#8AB17D",
+                "#E9C46A",
+                "#F4A261"
+            ],
+            wedgeprops={
+                "linewidth": 1.5,
+                "edgecolor": "white"
+            }
+        )
+
+        ax.legend(
+            wedges,
+            legend_labels,
+            loc="lower center",
+            bbox_to_anchor=(0.5, -0.08),
+            ncol=3,
+            frameon=False
+        )
+
+        ax.set_title(
+            title,
+            fontsize=14,
+            fontweight="bold",
+            pad=15
+        )
+
+        ax.axis("equal")
+
+        fig.tight_layout()
+        fig.savefig(path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+
+        return path
+
+    # ---------------------------------------------------------
+    # TABLE CREATOR
+    # ---------------------------------------------------------
+
+    def make_table(self, data, widths=None):
+
+        table = Table(
+            data,
+            colWidths=widths,
+            repeatRows=1
+        )
+
+        table.setStyle(
+            TableStyle([
+                (
+                    "BACKGROUND",
+                    (0, 0),
+                    (-1, 0),
+                    colors.lightgrey
+                ),
+
+                (
+                    "TEXTCOLOR",
+                    (0, 0),
+                    (-1, 0),
+                    colors.black
+                ),
+
+                (
+                    "FONTNAME",
+                    (0, 0),
+                    (-1, 0),
+                    "Helvetica-Bold"
+                ),
+
+                (
+                    "FONTNAME",
+                    (0, 1),
+                    (-1, -1),
+                    "Helvetica"
+                ),
+
+                (
+                    "FONTSIZE",
+                    (0, 0),
+                    (-1, -1),
+                    8
+                ),
+
+                (
+                    "GRID",
+                    (0, 0),
+                    (-1, -1),
+                    0.5,
+                    colors.grey
+                ),
+
+                (
+                    "VALIGN",
+                    (0, 0),
+                    (-1, -1),
+                    "MIDDLE"
+                ),
+
+                (
+                    "ALIGN",
+                    (1, 1),
+                    (-1, -1),
+                    "CENTER"
+                ),
+
+                (
+                    "TOPPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    5
+                ),
+
+                (
+                    "BOTTOMPADDING",
+                    (0, 0),
+                    (-1, -1),
+                    5
+                )
+            ])
+        )
+
+        return table
+
+    # ---------------------------------------------------------
+    # DATE
+    # ---------------------------------------------------------
+
+    def get_report_dates(self):
+
+        # Your pivot_date is already the date used by
+        # timed_report. For a weekly report, calculate
+        # Monday through Sunday.
+
+        try:
+
+            from datetime import datetime, timedelta
+
+            date = datetime.strptime(
+                self.report.pivot_date,
+                "%m/%d/%Y"
+            )
+
+            monday = date - timedelta(
+                days=date.weekday()
+            )
+
+            sunday = monday + timedelta(days=6)
+
+            return (
+                monday.strftime("%m/%d/%y"),
+                sunday.strftime("%m/%d/%y")
+            )
+
+        except Exception:
+
+            return (
+                str(self.report.pivot_date),
+                str(self.report.pivot_date)
+            )
+
+    # ---------------------------------------------------------
+    # CLEANUP
+    # ---------------------------------------------------------
+
+    def cleanup_charts(self):
+
+        if not self.chart_folder.exists():
+            return
+
+        for file in self.chart_folder.iterdir():
+
+            try:
+                file.unlink()
+            except Exception:
+                pass
+
+        try:
+            self.chart_folder.rmdir()
+        except Exception:
+            pass
+class timed_report():
+       available_times = ["day","week","month","ytd"] #how long the report will cover. ytd = year-to-date
+       selected_time = ""
+       pivot_date = ""
+ #should always equal unrecieved + released - give or take a little
+       unrecieved = [] 
+       released = []
+       duplicate_lots = []
+       sle_skips = []
+       total_cost = 0
+       percent_skipped = 0 #len(duplicate_lots) + len(sle_skips) / len(released)
+       percent_duplicates = 0 
+       percent_sle_skipped = 0
+       
+       percent_at_sle_x = []
+       skip_data = []
+       sle_values = []
+       sle0 = []
+       sle1 = []
+       sle2 = []
+       sle3 = []
+       sle4 = []
+       sle5 = []
+       sle0_5 = []
+       test_log = []
+       tests_requested_within_timeframe = []
+       test_data = []
+       incoming_ingredients = set()
+       
+       #report variables
+       sle_graph_labels = ["SLE0", "SLE1","SLE2","SLE3","SLE4","SLE5"]
+       sle_graph_values = []
+       skipped_graph_labels = ["Tested","SLE Skips","Duplicates"]
+       skipped_graph_values = []
+       overall_sle_values = []
+
+       #important ingredient codes
+       top_25_ingredients = ['BRP000U','CPB000U','BRF000P','MRG000P','MCC102P','AML000P','OLE020S','ECH004S','RBR000P','POM000P','GQD000P','JCI-160','BRP000U','BBG097S','AAC000P','DLF041C','OFE101C','BDR000P','MGS000P','DCP023S','RSV098S','GMO060S','LEU000P','THE000P','MGG040S']
+       top_25_data = {}
+       top_25_sle = {}
+       def sle_pie_chart(self,sle_values):
+          plt.pie(sle_values,labels=self.sle_graph_labels)
+          plt.title("SLE STATUS")
+          
+
+       def skipped_pie_chart(self,skipped_graph_values):
+          plt.pie(self.skipped_graph_values,labels=self.skipped_graph_labels)
+          plt.title("TESTING REQUESTS")
+          
+
+       def __init__(self,selected_time,pivot_date,skip_data,test_data,sle_changes):
+        logger.info(f"--Report initiated for {selected_time}--")
+        
+        if self.valid_selected_time(selected_time):
+           
+           self.selected_time = selected_time
+        else:
+           
+           self.selected_time = "week"
+        self.pivot_date = pivot_date
+        self.skip_data = skip_data
+        self.test_data = test_data
+        self.sle_changes = sle_changes
+        for ingredient in self.top_25_ingredients:
+           self.top_25_data[ingredient] = []
+
+        self.unrecieved = []
+        self.released = []
+        self.duplicate_lots = []
+        self.sle_skips = []
+
+        self.percent_at_sle_x = []
+
+        self.sle_values = []
+
+        self.sle0 = []
+        self.sle1 = []
+        self.sle2 = []
+        self.sle3 = []
+        self.sle4 = []
+        self.sle5 = []
+        self.sle0_5 = []
+
+        self.test_log = []
+        self.tests_requested_within_timeframe = []
+
+        self.incoming_ingredients = set()
+
+        self.sle_graph_values = []
+        self.skipped_graph_values = []
+        self.overall_sle_values = []
+
+        self.total_cost = 0
+        self.get_top_25_sle()
+
+       def valid_selected_time(self,selected_time):
+          if selected_time in self.available_times:
+             logger.info("Selected time valid")
+             return True
+          else:
+            logger.warning("Selected time invalid")
+            return False
+
+       def check_valid_date(self,indate):
+        try:
+          date = convert_between_date_formats(strip_date_zeros(indate))
+          pivot_date = convert_between_date_formats(strip_date_zeros(self.pivot_date))
+          date_range = self.selected_time
+
+          match (date_range):
+            case "day":
+                if pivot_date == date:
+                   return True
+                else:
+                   return False
+            case "week":
+                dt = datetime.strptime(pivot_date,"%m/%d/%Y")
+                week = [
+                     convert_between_date_formats(strip_date_zeros((dt - timedelta(days=dt.weekday()) + timedelta(days=i)).strftime("%m/%d/%Y")))
+                     for i in range(7)
+                                    ]
+                
+                if date in week:
+                   
+                   return True
+                else:
+                   return False
+                
+            case "month":
+                try:
+                    pivot_month = datetime.strptime(
+                        pivot_date,
+                        "%m/%d/%Y"
+                    ).month
+
+                    date_month = datetime.strptime(
+                        date,
+                        "%m/%d/%Y"
+                    ).month
+
+                    return pivot_month == date_month
+
+                except:
+                    logger.exception("Invalid date")
+                    return False
+
+            case "ytd":
+                try:
+
+                    if pivot_date[-2:] == date[-2:]:
+
+                     return True
+                    else:
+                     return False
+                except:
+                    logger.exception("Invalid date")
+                    return False
+            case _:
+                return False
+        except:
+           logger.error("Error in check_valid_date")
+           return True
+
+
+       def search_test_data(self,batchID,ingredientID,vendor):
+              test_data = 0
+              try:
+               i = 0
+               for entry in self.test_data:
+                   if entry[0] == ingredientID:
+                       test_data = entry
+                       rownum = i
+                       break  
+                   i += 1
+              except Exception as e:
+                 logger.error(e)
+              if test_data == 0:
+                 logger.info("COULD NOT FIND TEST DATA IN CACHE. RECACHING...")
+                 self.test_data(self.configs['test_request_sheet_ID'])
+                 
+                
+              i = 0
+              for entry in self.test_data:
+                            try:  
+          
+                             if entry[0] == ingredientID:
+       
+                                 test_data = entry
+                                 rownum = i
+                                 
+                                 break  
+                            
+                            except Exception as e:
+                             logger.error(e)
+                            i += 1
+              if test_data == 0:
+                 logger.error("COULD NOT FIND TEST DATA")
+                 return 0
+              else:
+                 skip_value = self.get_skipped(ingredientID,vendor,batchID)
+                 try:
+                   if entry[7] == "PENDING" or entry[7] == None:
+                     price = 0
+                   else: price = entry[7]
+
+                 except Exception as e:
+                    logger.exception(e)
+                    price = 0
+                 
+                 data = td(ingredientID=entry[0],ingredient_name=entry[1],heavy_metals=yes_no_to_bool(entry[2]),routine_micros=yes_no_to_bool(entry[3]),standard_request=entry[4],request_method = entry[5],request_specs = entry[6],standard_price=price,skip=skip_value)
+                 
+                 self.total_cost += int(data.standard_price)
+                 
+                 return data
+       
+       def get_sle_status(self,ingredientID,vendor,skip_data):
+            for entry in skip_data:
+             if len(entry) < 4:
+              continue
+             try:
+                 if entry[2].strip() == ingredientID.strip() and entry[3].strip() == vendor.strip():
+
+                    return int(entry[0])
+             except IndexError:
+                pass
+                
+       def seperate_by_sle_status(self):
+          for entry in self.sle_values:
+             match entry[3]:
+                case 0:
+                   self.sle0.append(entry)
+                case 1:
+                   self.sle1.append(entry)
+                case 2:
+                   self.sle2.append(entry)
+                case 3:
+                   self.sle3.append(entry)
+                case 4:
+                   self.sle4.append(entry)
+                case 5:
+                   self.sle5.append(entry)
+                case _:
+                   logger.info("Failed to assign entry")
+          self.sle0_5.append(self.sle0)
+          self.sle0_5.append(self.sle1)
+          self.sle0_5.append(self.sle2)
+          self.sle0_5.append(self.sle3)
+          self.sle0_5.append(self.sle4)
+          self.sle0_5.append(self.sle5)
+                    
+       def get_incoming(self,check_in_data,month):
+
+          new_values = []
+
+          for row in check_in_data[month]['values']:
+                if not row or not str(row[0]).strip():
+                    continue
+
+                # YTD already gets the correct months from test_report()
+                if self.selected_time == "ytd":
+                    new_values.append(row)
+                    continue
+
+                # Other report types need date filtering
+                try:
+                    if self.check_valid_date(row[13]):
+                        new_values.append(row)
+                except IndexError:
+                    # No date available, so add without date checking
+                    new_values.append(row)
+          if not hasattr(self, 'incoming'):
+            self.incoming = {'values': []}
+            logger.info(
+                f"GET_INCOMING START: {month} | "
+                f"current total = {len(self.incoming['values']) if hasattr(self, 'incoming') else 0}")
+         
+          logger.info(f"{month}: adding {len(new_values)} entries")
+          self.incoming['values'].extend(new_values)
+          logger.info(f"{month}: total is now {len(self.incoming['values'])}")
+          logger.info("Got Incoming")
+          logger.info(f"YTD total after {month}: {len(self.incoming['values'])}")
+          for entry in new_values:   
+             check_skip = True
+
+             try:
+                self.incoming_ingredients.add(entry[1])
+             except:
+                logger.exception("Failed to add ingredient")
+             try:
+                if yes_no_to_bool(entry[20]):
+                    self.duplicate_lots.append(entry)
+                    check_skip = False
+             except IndexError:
+                 logger.exception("Index Error")
+             try:
+                if not entry[16].strip():
+                    self.unrecieved.append(entry)
+             except IndexError:
+                logger.exception("Index Error")
+             try:
+                if entry[17].strip():
+                    self.released.append(entry)
+             except IndexError:
+                logger.exception("Index Error")
+             try:
+                sle = self.get_sle_status(entry[1],entry[3],self.skip_data)
+                self.sle_values.append([entry[0],entry[1],entry[3],sle])
+             except:
+                logger.exception("Error in sle values")
+             try:
+                #print(f"Calling get_skipped on {entry[0]} {entry[1]}")
+                if check_skip and self.get_skipped(entry[1],entry[3],entry[0]):
+                        if entry not in self.sle_skips:
+                            self.sle_skips.append(entry)
+             
+
+             except:
+                logger.exception("Error in get_skipped")
+             try:
+                if entry[1] in self.top_25_ingredients:
+                       self.top_25_data[entry[1]].insert(
+                        0,
+                        [entry[0], f"SLE STATUS: {sle}"]
+                    )
+             except:
+                logger.exception("Error in checking top 25 status")
+                
+          #print(len(self.duplicate_lots))
+          
+          self.percent_duplicates = len(self.duplicate_lots)/len(self.incoming['values']) * 100
+
+       
+       def get_skipped(self,ingredientID,vendor,batchID):
+              #return False #fix skip value check
+              skip = "Not Found"
+              
+              column = None
+              #print(f"Checking {batchID} {ingredientID}")
+              
+              for entry in self.skip_data:
+                 try: 
+                    if len(entry) < 4:
+                        continue  
+                    
+                    if entry[2] == ingredientID and entry[3] == vendor:
+                       i = 0
+                       for id in entry:
+                          
+                          if id == batchID:
+                           column = i
+                           break
+                          i += 1  
+                 except Exception as e:
+                  logger.error(e)
+                 
+
+              try:
+               skip = skip_value_by_column(column)
+              except Exception as e:
+               logger.error(e)
+               logger.error("COULD NOT FIND SKIP DATA")
+               return 0
+              if str(skip) == "Not Found":
+                 logger.error("COULD NOT FIND SKIP DATA")
+                 return 0
+              else: return skip
+
+       def get_top_25_sle(self):
+        with open("sles.json", "r") as f:
+            self.top_25_sle_data = json.load(f)
+
+        for ingredient in self.top_25_ingredients:
+
+            sle = "N/A"
+            
+            try:
+
+                ingredient_id = ingredient.strip().upper()
+                sle_values = []
+
+                for key, value in self.top_25_sle_data.items():
+
+                    key = key.replace("\r", "").replace("\n", "").strip().upper()
+
+                    # Get ingredient ID from beginning of key
+                    key_ingredient = key.split()[0]
+
+                    if key_ingredient == ingredient_id:
+                        sle_values.append(int(value))
+
+                if sle_values:
+                    sle = max(sle_values)
+
+                self.top_25_data[ingredient] = [
+                    ["", f"SLE STATUS: {sle}"]
+                ]
+
+            except Exception:
+                logger.exception("Error getting SLE status")
+       
+       def get_test_log(self,sheetID):
+          self.test_log = cache_test_log(sheetID)['values']
+          for entry in self.test_log:
+            try:
+             if len(entry) < 8:
+                continue
+             
+             if self.check_valid_date(entry[5]): #TODO: update to work within specified range
+                
+                self.tests_requested_within_timeframe.append(self.search_test_data(entry[0],entry[1],entry[2]))
+            except:
+               logger.exception("Error in get_test_log")
+       
+       def get_overall_sle(self,overall_data):
+          data = overall_data
+          
+          for i in range(6):
+             self.overall_sle_values.append(float([data[i][2]][0]))
+
+       def print_values(self):
+          self.seperate_by_sle_status()
+          
+          sle_values = []
+          sle_graph_values = []
+          self.percent_sle_skipped = (round(len(self.sle_skips)/len(self.incoming['values'])*100,2))
+          self.percent_skipped = ((len(self.sle_skips)+len(self.duplicate_lots))/len(self.incoming['values'])*100)
+          total_sle = sum(len(group) for group in self.sle0_5)
+          for i in range(6):
+             #print(self.sle0_5)
+             self.sle_graph_values.append(len(self.sle0_5[i]))
+             self.percent_at_sle_x.append(round(len(self.sle0_5[i])/total_sle*100,2)) #TODO: account for duplicate ingredients
+         
+
+          logger.info("SELECTED TIME")
+          logger.info(self.selected_time)
+          logger.info("PERCENT DUPLICATES")
+          logger.info(f"{round(self.percent_duplicates,2)}%")
+          logger.info("PERCENT SLE SKIPS")
+          logger.info(f"{round(self.percent_sle_skipped,2)}%")
+          logger.info("PERCENT SKIPPED LOTS")
+          logger.info(f"{round(self.percent_skipped,2)}%")
+          logger.info(f"#Duplicates: {len(self.duplicate_lots)}")
+          logger.info(f"#SLE Skips: {len(self.sle_skips)}")
+          logger.info(f"#Total: {len(self.incoming['values'])}")
+          logger.info(f"Total Estimated Cost Of Tests: {self.total_cost}")
+          logger.info(f"PERCENT SLE 0: {self.percent_at_sle_x[0]}%, 1: {self.percent_at_sle_x[1]}%, 2: {self.percent_at_sle_x[2]}%, 3: {self.percent_at_sle_x[3]}%, 4: {self.percent_at_sle_x[4]}%, 5: {self.percent_at_sle_x[5]}%,")
+          logger.info("TOP 25 INGREDIENTS RECEIVED")
+          logger.info(self.top_25_data)
+          logger.info("INCOMING INGREDIENTS")
+          logger.info(self.incoming_ingredients)
+          logger.info("OVERALL SLE")
+          logger.info(self.overall_sle_values)
+          self.sle_pie_chart(self.sle_graph_values)
+          self.sle_pie_chart(self.overall_sle_values)
+          self.skipped_graph_values = []
+          tested = len(self.incoming['values']) - len(self.duplicate_lots) - len(self.sle_skips)
+          logger.info(f"Incoming: {len(self.incoming['values'])}")
+          logger.info(f"Duplicates: {len(self.duplicate_lots)}")
+          logger.info(f"SLE skips: {len(self.sle_skips)}")
+          logger.info(f"Tested: {tested}")
+          self.skipped_graph_values.append(tested)
+          self.skipped_graph_values.append(len(self.sle_skips))
+          self.skipped_graph_values.append(len(self.duplicate_lots))
+          self.skipped_pie_chart(self.skipped_graph_values)
 class MyApp(QMainWindow, Ui_QCRelease):
 
     most_recent_request = None
@@ -397,6 +1695,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
     annotate = False
     timestamp = False
     configs = {}
+    label_request_date = 0
 
     #run report variables
     starttime = 0
@@ -410,7 +1709,11 @@ class MyApp(QMainWindow, Ui_QCRelease):
     heavy_metals_price = 114
     routine_micros_price = 55
 
+    #timed report variables
+    selected_date_range = ""
+    pivot_date = str(todays_date())
 
+    changes = {}
     def __init__(self):
         super().__init__()
         self.starttime = t()
@@ -431,7 +1734,24 @@ class MyApp(QMainWindow, Ui_QCRelease):
         self.releaseButton.clicked.connect(self.release_clicked)
         self.batchIDinput.returnPressed.connect(self.release_clicked)
         self.tustinbutton.clicked.connect(self.tustinbuttonclicked)
+        self.actionOpen.triggered.connect(self.open_clicked)
+        self.actionSave.triggered.connect(lambda: self.create_save_file("qc_release_save_" + tt.strftime("%Y%m%d-%H%M%S") + ".json"))
+        self.actionSave_As.triggered.connect(self.save_as_clicked)
+        self.actionRefresh_Check_In_Data.triggered.connect(self.cache_rm_clicked)
+        self.actionRefresh_Component_Check_In_Data.triggered.connect(self.cache_comp_clicked)
+        self.actionRefresh_Label_Check_In_Data.triggered.connect(self.cache_label_clicked)
+        self.actionRefresh_Test_and_Skip_Data.triggered.connect(self.cache_test_clicked)
+        self.report_test_button.clicked.connect(self.test_report)
+        self.dayButton.toggled.connect(lambda:self.update_selected_range("day"))
+        self.weekButton.toggled.connect(lambda:self.update_selected_range("week"))
+        self.monthButton.toggled.connect(lambda:self.update_selected_range("month"))
+        self.yearButton.toggled.connect(lambda:self.update_selected_range("ytd"))
+        self.report_date.setDate(QDate.currentDate())
+        self.report_date.userDateChanged.connect(self.update_pivot_date)
+        self.report_progress_bar.setValue(0)
         self.labelsthread = labels_thread()
+       
+
 
     def check_update_ready(self):
         update_file = APP_DIR / "update_ready.json"
@@ -508,13 +1828,248 @@ class MyApp(QMainWindow, Ui_QCRelease):
             logger.exception(
                 "Error processing available update"
             )
+
+    def create_save_file(self,filename):
+     try:
+       state = {
+              
+              "cached_RM_check_in_values":self.cached_RM_check_in_values,
+              "cached_component_check_in_values":self.cached_component_check_in_values,
+              "cached_label_check_in_values":self.cached_label_check_in_values,
+              "cached_test_values":self.cached_test_values,
+              "cached_skip_values":self.cached_skip_values,
+              "recent_requests":self.recent_requests,
+              "to_be_tested":self.to_be_tested,
+              "batches_released":self.batches_released,
+              "labels_created":self.labels_created,
+              "batches_searched":self.batches_searched,
+              "test_sheets_searched":self.test_sheets_searched,
+              "tests_requested":self.tests_requested,
+              "total_price_of_tests":self.total_price_of_tests,
+       } 
+       if isinstance(self.most_recent_request, list):
+          state["most_recent_request"] = self.most_recent_request
+       elif isinstance(self.most_recent_request,raw_material_data): 
+          state["most_recent_request"] = self.most_recent_request.list_form()
+       
+       if not os.path.exists(APP_DIR / "Save_Files"): os.makedirs(APP_DIR / "Save_Files")
+       save_path = APP_DIR / "Save_Files" / f"{filename}"
+       with open(save_path, "w", encoding="utf-8") as file:
+            json.dump(state, file, indent=4)
+
+       logger.info("Program state saved")
+
+     except Exception as e:
+        logger.exception(e)
+        logger.exception("Could not save program state")
+
+    def load_save_file(self,file):
+       try:
+        with open(file, "r", encoding="utf-8") as f:
+             state = json.load(f)
+        self.most_recent_request = state.get("most_recent_request", None)
+
+        self.cached_RM_check_in_values = state.get(
+            "cached_RM_check_in_values", {}
+        )
+
+        self.cached_component_check_in_values = state.get(
+            "cached_component_check_in_values", {}
+        )
+
+        self.cached_label_check_in_values = state.get(
+            "cached_label_check_in_values", {}
+        )
+
+        self.cached_test_values = state.get(
+            "cached_test_values", []
+        )
+
+        self.cached_skip_values = state.get(
+            "cached_skip_values", []
+        )
+
+        self.recent_requests = state.get(
+            "recent_requests", []
+        )
+
+        self.to_be_tested = state.get(
+            "to_be_tested", []
+        )
+
+        self.batches_released = state.get(
+            "batches_released", 0
+        )
+
+        self.labels_created = state.get(
+            "labels_created", 0
+        )
+
+        self.batches_searched = state.get(
+            "batches_searched", 0
+        )
+
+        self.test_sheets_searched = state.get(
+            "test_sheets_searched", 0
+        )
+
+        self.tests_requested = state.get(
+            "tests_requested", 0
+        )
+
+        self.total_price_of_tests = state.get(
+            "total_price_of_tests", 0
+        )
+
+        self.update_table()
+        self.update_test_table()
+        logger.info("Program state loaded")
+
+       except Exception as e:
+         logger.exception(e)
+         logger.exception("Could not load program state")
+          
+    def open_clicked(self):
+        save_folder = APP_DIR / "Save_Files"
+        if save_folder.exists():
+            start_location = str(save_folder)
+        else:
+            start_location = str(APP_DIR)
+        filename, _ = QFileDialog.getOpenFileName(
+        self,
+        "Open File",
+        start_location,
+        "All Files (*.*)"
+        )
+
+        if filename:
+           self.load_save_file(filename)
+
+    def save_as_clicked(self):
+        save_folder = APP_DIR / "Save_Files"
+        if save_folder.exists():
+         start_location = str(save_folder)
+        else:
+         start_location = str(APP_DIR)
+
+        filename, _ = QFileDialog.getSaveFileName(
+        self,
+        "Save As",
+        start_location,
+        "JSON Files (*.json);;All Files (*.*)"
+        )
+        if filename:
+          self.create_save_file(filename)
         
+
+    def update_selected_range(self,selection):
+       self.selected_date_range = selection
+       return
+
+    def report_finished(self,file):
+        self.report_progress_bar.setValue(100)
+        logger.info("Report finished")
+        os.startfile(str(file))
+    def report_error(self, error):
+        logger.error(error)
+        QMessageBox.critical(self, "Report Error", error)
+
+    def update_pivot_date(self):
+       value = self.report_date.date()
+       self.pivot_date = value.toString("MM/dd/yy")
+       logger.info(self.pivot_date)
+       
+       return
+    
+    def test_report(self):
+        self.cache_rm_clicked()
+        self.cache_test_data_values(self.configs['test_request_sheet_ID'])
+        self.cache_skip_values(self.configs['skip_log_ID'])
+        self.find_sle_changes()
+        self.report_progress_bar.setValue(0)
+        if self.selected_date_range == "ytd":
+            months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+
         
+
+            converted_date = convert_between_date_formats(self.pivot_date)
+            month_num = int(converted_date.split("/")[0])
+            year = converted_date.split("/")[2]
+
+
+
+            for i in range(month_num):
+                month = months[i]
+                month_year = f"{month} {year}".upper()
+
+                self.cache_check_in_values(
+                    self.configs['RM_check_in_sheet_ID'],
+                    month_year,
+                    'R'
+                )
+        self.report_worker = ReportWorker(
+        self.selected_date_range,
+        self.pivot_date,
+        self.cached_skip_values,
+        self.cached_test_values,
+        self.cached_RM_check_in_values,
+        convert_date_to_month_year(todays_date()),
+        self.configs['testing_log_sheet_ID'],
+        get_test_data(
+            self.configs['skip_log_ID'],
+            "SLE Status",
+            "!A25:C30"
+        )['values'],
+        APP_DIR / "Reports" /
+        f"RM_QC_Report_{self.pivot_date.replace('/', '-')}.pdf",
+        self.changes
+    )
+
+        self.report_worker.progress.connect(self.report_progress_bar.setValue)
+        self.report_worker.finished.connect(lambda file: self.report_finished(APP_DIR / "Reports" /
+                f"RM_QC_Report_{self.pivot_date.replace('/', '-')}.pdf"))
+        self.report_worker.error.connect(
+            lambda error: self.report_error(error)
+        )
+
+        self.report_worker.start()
+
+    def cache_rm_clicked(self):
+       try:
+        self.cache_check_in_values(self.configs['RM_check_in_sheet_ID'],convert_date_to_month_year(todays_date()),'R')
+        QMessageBox.information(self,"Done","RM Check In Values for " + str(convert_date_to_month_year(todays_date())) + " cached successfully.")
+       except Exception as e:
+          logger.exception("RM Cache Failed")
+          self.show_error(e)
+    def cache_comp_clicked(self):
+           try:
+            self.cache_check_in_values(self.configs['component_check_in_sheet_ID'],convert_date_to_month_year(todays_date()),'P')
+            QMessageBox.information(self,"Done","Component Check In Values for " + str(convert_date_to_month_year(todays_date())) + " cached successfully.")
+           except Exception as e:
+              logger.exception("Component Cache Failed")
+              self.show_error(e)
+    def cache_label_clicked(self):
+           try:
+            self.cache_check_in_values(self.configs['label_check_in_sheet_ID'],convert_date_to_month_year(todays_date()),'L')
+            QMessageBox.information(self,"Done","Label Check In Values for " + str(convert_date_to_month_year(todays_date())) + " cached successfully.")
+           except Exception as e:
+              logger.exception("Label Cache Failed")
+              self.show_error(e)
+    def cache_test_clicked(self):
+           try:
+            self.cache_test_data_values(self.configs['test_request_sheet_ID'])
+            QMessageBox.information(self,"Done","Test data values cached successfully.")
+            self.cache_skip_values(self.configs['skip_log_ID'])
+            QMessageBox.information(self,"Done","Skip data values cached successfully.")
+           except Exception as e:
+              logger.exception("Test Cache Failed")
+              self.show_error(e)
     def closeEvent(self, a0):
         logger.info("GENERATING SESSION REPORT...")
         self.endtime = t()
         r = run_report(self.starttime,self.endtime,self.batches_released,self.batches_searched,self.test_sheets_searched,self.labels_created,self.tests_requested,self.total_price_of_tests)
         r.print_run_report()
+        self.create_save_file("qc_release_save_" + tt.strftime("%Y%m%d-%H%M%S")+ ".json")
         logger.info("CLOSING SESSION..." + "\n")
         return super().closeEvent(a0)
         
@@ -531,8 +2086,46 @@ class MyApp(QMainWindow, Ui_QCRelease):
        logger.info("Saved batch ID " + self.most_recent_request.batchID + " in saved batches")
        return
           
-        
+    def update_sle_data(self):
+     
+            sles = {} 
 
+            for entry in self.cached_skip_values:
+                  if len(entry) < 4: continue
+                  try:  
+                    title = entry[2] + " " + entry[3]
+                    sles[title] = int(entry[0])
+                  except Exception as e:
+                        logger.exception(e)
+                        logger.exception("Could not save SLE statuses")
+                        continue
+            save_path = APP_DIR / "sles.json"
+            with open(save_path, "w", encoding="utf-8") as file:
+                json.dump(sles, file, indent=4)
+        
+                logger.info("SLE STATUSES SAVED")
+
+    def fetch_sle_data(self):
+        
+        save_path = APP_DIR / "sles.json"
+
+        with open(save_path, "r", encoding="utf-8") as file:
+            sles = json.load(file)  
+        return sles
+    def find_sle_changes(self):
+        old_sles = self.fetch_sle_data()
+        self.update_sle_data()
+        new_sles = self.fetch_sle_data()
+        changed_sles = {}
+
+        for key in old_sles.keys() | new_sles.keys():
+            if old_sles.get(key) != new_sles.get(key):
+                changed_sles[key] = {
+                    "old": old_sles.get(key),
+                    "new": new_sles.get(key)
+                }
+        print(changed_sles)
+        self.changes = changed_sles
     def get_selected_cell_batch_data(self,row,column):
         selected_cell = self.batchdatatable.item(row,column)
         self.selected_request = self.recent_requests[selected_cell.row()]
@@ -618,7 +2211,8 @@ class MyApp(QMainWindow, Ui_QCRelease):
        else:
           logger.error("Error in caching test values")
     def cache_skip_values(self,sheetID):
-       cache = get_test_data(sheetID,"SLE Status","!E:BC")['values']
+       logger.info("Attempting to cache skip values")
+       cache = get_test_data(sheetID,"SLE Status","!D:BC")['values']
        if isinstance(cache, str):
           logger.error(cache)
        elif isinstance(cache,list):
@@ -626,6 +2220,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
        else:
           logger.error("Error in caching skip values")
           logger.error(type(cache))
+       return
     def search_test_data(self,batch_data):
        test_data = 0
        try:
@@ -662,9 +2257,13 @@ class MyApp(QMainWindow, Ui_QCRelease):
           return 0
        else:
           skip_value = self.get_skip_value(batch_data)
-          if entry[7] == "PENDING":
+          try:
+            if entry[7] == "PENDING" or entry[7] == None:
               price = 0
-          else: price = entry[7]
+            else: price = entry[7]
+          except Exception as e:
+             logger.exception(e)
+             price = 0
           data = td(ingredientID=entry[0],ingredient_name=entry[1],heavy_metals=yes_no_to_bool(entry[2]),routine_micros=yes_no_to_bool(entry[3]),standard_request=entry[4],request_method = entry[5],request_specs = entry[6],standard_price=price,skip=skip_value)
           return data
     def get_skip_value(self,batch):
@@ -676,7 +2275,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
               
                for entry in self.cached_skip_values:
                     
-                    if entry[0] == batch.ingredientID and entry[1] == batch.vendor:
+                    if entry[2] == batch.ingredientID and entry[3] == batch.vendor:
                        i = 0
                        for id in entry:
                           if id == batch.batchID:
@@ -685,19 +2284,19 @@ class MyApp(QMainWindow, Ui_QCRelease):
                           i += 1  
               except Exception as e:
                  logger.error(e)
-                 logger.error("here1")
+                 
               try:
                 skip_data = skip_value_by_column(column)
               except Exception as e:
                   logger.error(e)
-                  logger.error("here2")
+                  
               if str(skip_data) == "Not Found":
                  logger.info("COULD NOT FIND SKIP DATA IN CACHE. RECACHING...")
                  self.cache_skip_values(self.configs['skip_log_ID'])
                  try:
                         for entry in self.cached_skip_values:
                                             
-                            if entry[0] == batch.ingredientID and entry[1] == batch.vendor:
+                            if entry[2] == batch.ingredientID and entry[3] == batch.vendor:
                                i = 0
                                for id in entry:
                                  if id == batch.batchID:
@@ -706,7 +2305,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                                  i += 1   
                  except Exception as e:
                            logger.error(e)
-                           logger.error("here3")
+                           
                  try:
                     skip_data = skip_value_by_column(column)
                  except Exception as e:
@@ -742,9 +2341,11 @@ class MyApp(QMainWindow, Ui_QCRelease):
                   logger.debug(e)
                   return 0
            case 'L': #label
+                date = self.label_request_date
                 try:
                  if date == 0:
                     date,ok = QInputDialog.getText(self,"Label Recieving Date","Please input the label recieving date (MM/DD/YYYY)")
+                    self.label_request_date = date
                     if not ok:
                        logger.info("USER CANCELLED LABEL REQUEST")
                        return 0
@@ -762,17 +2363,18 @@ class MyApp(QMainWindow, Ui_QCRelease):
         zeroless_date = convert_between_date_formats(strip_date_zeros(date))
         try:
             for entry in sheetData['values']:
+             row += 1
              try:
-                row += 1
                 
-                if entry[0] == batchID and type_material != 'L':
+
+                if type_material != 'L' and entry[0] == batchID:
                     
                     raw_material_info = entry
                     break   
                 
                 if type_material == 'L':
-                      
-                      if entry[0] == zeroless_date and entry[3] == batchID:
+
+                      if entry[0].strip() == zeroless_date and entry[3].strip() == batchID:
                           raw_material_info = entry
                           break
              except IndexError:
@@ -1042,7 +2644,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
             logger.error(e)
             self.show_error("NO BATCH ID PROVIDED")
             return
-        if len(batchID) < 7 or (len(batchID) > 7 and len(batchID) < 9):
+        if len(batchID) < 7:
             try:
                self.batches_searched.append([batchID + " ", "FAILED TO FIND"])
                self.progressBar.setValue(0)
@@ -1051,8 +2653,9 @@ class MyApp(QMainWindow, Ui_QCRelease):
             except Exception:
                 logger.exception("FATAL APPLICATION ERROR")
             return
-        if len(batchID) >= 9:
+        if len(batchID) >= 8:
             type_material = 'L'
+            self.label_request_date = 0
         self.progressBar.setValue(5)
         batch_data = self.search_data_from_sheet(batchID,type_material)
         self.progressBar.setValue(10)
@@ -1076,17 +2679,22 @@ class MyApp(QMainWindow, Ui_QCRelease):
             self.progressBar.setValue(15)
             date = 0
             if type_material == 'L':
+                date = self.label_request_date
                 if date == 0:
                     try:
                             date,ok = QInputDialog.getText(self,"Label Recieving Date","Please input the label recieving date (MM/DD/YYYY)")
+                            self.label_request_date = date
+                            logger.info(date)
                             if not ok:
                              logger.info("USER CANCELLED LABEL REQUEST")
                              return 0
-                            month = convert_date_to_month_year(date)
+                
+                            
                     except Exception as e:
                         logger.error(str(e))
                         self.show_error("ERROR IN INPUT")
                         return
+                month = convert_date_to_month_year(date)
             else: month = month_from_batchID(batchID)
             self.progressBar.setValue(20)
             self.cache_check_in_values(sheetID,month,type_material)
@@ -1137,7 +2745,44 @@ class MyApp(QMainWindow, Ui_QCRelease):
        self.search_sheet_thread.started.connect(self.search_sheet_worker.find_test_data_sheet)
        self.search_sheet_worker.moveToThread(self.search_sheet_thread)
        self.search_sheet_thread.start()
-       
+
+
+
+    def show_checkbox_popup(self):
+        dialog = QtWidgets.QDialog(self)
+        dialog.setWindowTitle("On COA")
+        dialog.resize(400, 150)
+        layout = QtWidgets.QVBoxLayout(dialog)
+
+        checkboxes = []
+
+        options = [
+            "Dietary",
+            "Heavy Metals",
+            "Micros",
+        ]
+
+        for option in options:
+            checkbox = QtWidgets.QCheckBox(option)
+            layout.addWidget(checkbox)
+            checkboxes.append(checkbox)
+
+        button = QtWidgets.QPushButton("OK")
+        layout.addWidget(button)
+
+        button.clicked.connect(dialog.accept)
+
+        if dialog.exec_() == QtWidgets.QDialog.Accepted:
+            selected = [
+                checkbox.text()
+                for checkbox in checkboxes
+                if checkbox.isChecked()
+            ]
+
+            print(selected)
+            return selected
+
+        return []   
     def release_clicked(self):
        self.display_clicked()
        self.search_sheet_clicked()
@@ -1170,12 +2815,29 @@ class MyApp(QMainWindow, Ui_QCRelease):
              data = td(ingredientID=batch.ingredientID,ingredient_name=batch.ingredient_name,heavy_metals=True,routine_micros=True,standard_request="",standard_price="",skip=False)
           result = write_to_ssf(batch,data,self.configs["ssf_sheet_ID"],self.configs["testing_log_sheet_ID"],11+i)
           if result == "SKIPPED":
+              hm = False
+              rm = False
               logger.info("BATCH ID: " + batch.batchID + " SKIPPED")
+              selected = self.show_checkbox_popup()
+              if "Dietary" in selected:
+                 data.standard_request = "ID"
+                 #data.request_method = "HPTLC"
+                 data.request_specs = "Conforms to Reference Standard"
+                 data.standard_price = 140
+              if "Heavy Metals" not in selected:
+                 hm = True
+              if "Micros" not in selected:
+                rm = True
+              data.skip = False
+              data.heavy_metals = hm
+              data.routine_micros = rm
+              result = write_to_ssf(batch,data,self.configs["ssf_sheet_ID"],self.configs["testing_log_sheet_ID"],11+i)
               self.tests_requested.append([batch.batchID + " " + batch.ingredientID + " ", "TEST SKIPPED DUE TO SLE STATUS"])
               self.show_error("BATCH ID: " + batch.batchID + " SKIPPED DUE TO SLE STATUS")
-              self.remove_test_item(self.to_be_tested.index(entry))
+
               self.update_test_table()
-              continue
+              if not selected:
+                continue
           self.tustinbar.setValue(math.floor(progress))
           i+=1
           price = 0
@@ -1222,13 +2884,15 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
     logging.basicConfig(filename='debug.log', encoding='utf-8', level=logging.DEBUG)
     logger.debug('\n' + "--APPLICATION LAUNCHED AT " + str(datetime.now()) + "--" + '\n')
+    logger.info("Version 1.0.7")
     config = read_config()
     logger.info(config)
-    logger.info("QC Release 1.0.3 update test")
     try:
         app = QApplication(sys.argv)
         app.setWindowIcon(QIcon(str(APP_DIR / "jetpack_icon.ico")))
         window = MyApp()
+        
+       
         window.configs = config
         window.show()
         check_for_updates()

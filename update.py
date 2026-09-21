@@ -8,6 +8,8 @@ import time
 import logging
 from pathlib import Path
 from urllib.request import Request, urlopen
+import ssl
+import certifi
 
 APP_DIR = Path(__file__).resolve().parent
 UPDATE_INFO_FILE = APP_DIR / "update_ready.json"
@@ -42,7 +44,15 @@ def get_latest_release():
         }
     )
 
-    with urlopen(request, timeout=10) as response:
+    context = ssl.create_default_context(
+    cafile=certifi.where()
+)
+
+    with urlopen(
+        request,
+        timeout=10,
+        context=context
+    ) as response:
         release = json.loads(response.read().decode("utf-8"))
 
     logger.info(
@@ -82,9 +92,14 @@ def download_update(download_url):
         }
     )
 
+    context = ssl.create_default_context(
+    cafile=certifi.where()
+)
+
     with urlopen(
         request,
-        timeout=60
+        timeout=10,
+        context=context
     ) as response:
 
         with open(

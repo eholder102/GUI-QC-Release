@@ -55,6 +55,7 @@ class run_report:
         f.write("--RUN REPORT FOR " + tt.strftime("%Y%m%d-%H%M%S") + "ENDS--")
 
 class test_data:
+   sle = 0
    def __init__(self, ingredientID, ingredient_name, heavy_metals=True, routine_micros=True, standard_request="",request_method = "", request_specs = "",standard_price=0,skip=False):
          self.ingredientID = ingredientID
          self.ingredient_name = ingredient_name
@@ -65,6 +66,8 @@ class test_data:
          self.skip = skip
          self.request_method = request_method
          self.request_specs = request_specs
+   def print_data(self):
+       print([self.ingredientID,self.ingredient_name,self.heavy_metals,self.routine_micros,self.standard_request,self.standard_price,self.skip,self.request_method,self.request_specs])
         
 class material_data:
    def __init__(self,batchID, ingredientID, ingredient_name, vendor, vendor_lot_num, expiration_date,num_of_containers, is_duplicate_lot="NO", PO_num = "0",row = 0):
