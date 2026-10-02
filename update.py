@@ -281,7 +281,40 @@ def launch_application():
         cwd=str(APP_DIR)
     )
 
+def install_dependencies():
+    python_path = Path(__file__).parent / "Python" / "python.exe"
 
+    logger.info("Checking for matplotlib...")
+
+    try:
+        subprocess.run(
+            [
+                str(python_path),
+                "-c",
+                "import matplotlib"
+            ],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        logger.info("matplotlib is already installed")
+
+    except subprocess.CalledProcessError:
+        logger.info("matplotlib not found. Installing...")
+
+        subprocess.run(
+            [
+                str(python_path),
+                "-m",
+                "pip",
+                "install",
+                "matplotlib"
+            ],
+            check=True
+        )
+
+        logger.info("matplotlib installed successfully")
 def main():
 
     logger.info("Updater arguments: %s", sys.argv)
@@ -322,7 +355,7 @@ def main():
                 zip_path,
                 temp_dir
             )
-
+            install_dependencies()
             launch_application()
 
             logger.info(

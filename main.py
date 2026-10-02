@@ -18,6 +18,7 @@ from qcrelease import Ui_QCRelease
 #graceful handling
 import configparser
 import logging
+from logging.handlers import RotatingFileHandler
 
 #timed reports
 import matplotlib
@@ -53,7 +54,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 from pathlib import Path
 
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.3.6"
 APP_DIR = Path(__file__).resolve().parent
 #my_path_to_label_opener = "C:/Program Files/Google/Chrome/Application/chrome.exe"
 def create_config():
@@ -446,6 +447,17 @@ class ReportWorker(QThread):
                     month_year = date_string.upper()
                     r.get_incoming(self.check_in_data,
                                     month_year)
+            if r.selected_time == "week":
+                months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+                
+                month_num = int(self.pivot_date[0:2])
+
+                month = months[month_num-2]
+                year = self.pivot_date[6:10]
+                date_string = month + " " + year
+                month_year = date_string.upper()
+                r.get_incoming(self.check_in_data,
+                                month_year)
             self.progress.emit(30)
 
             r.get_test_log(
@@ -677,13 +689,18 @@ class PDFReport:
         skips = len(self.report.sle_skips)
 
         tested = incoming - duplicates - skips
-
+        self.report.read_prev_total_cost()
+        self.report.write_total_cost()
         summary_data = [
             ["Metric", "Value"],
             ["Incoming ingredients", str(incoming)],
             ["Duplicates", str(duplicates)],
             ["SLE skips", str(skips)],
             ["Tested", str(tested)],
+                        [
+                "Previous week cost estimate",
+                f"${self.report.prev_week_cost:,.2f}"
+            ],
             [
                 "Estimated total cost of tests",
                 f"${self.report.total_cost:,.2f}"
@@ -1257,6 +1274,18 @@ class timed_report():
        top_25_ingredients = ['BRP000U','CPB000U','BRF000P','MRG000P','MCC102P','AML000P','OLE020S','ECH004S','RBR000P','POM000P','GQD000P','JCI-160','BRP000U','BBG097S','AAC000P','DLF041C','OFE101C','BDR000P','MGS000P','DCP023S','RSV098S','GMO060S','LEU000P','THE000P','MGG040S']
        top_25_data = {}
        top_25_sle = {}
+
+       def write_total_cost(self):
+          with open(APP_DIR / "prev_cost_estimate.txt",'w') as file:
+             file.write(str(self.total_cost))
+       def read_prev_total_cost(self):
+          try:
+            with open(APP_DIR / "prev_cost_estimate.txt",'r') as file:
+                self.prev_week_cost = int(file.read())
+          except:
+             logger.exception("Error in reading previous week cost")
+             self.prev_week_cost = 0 
+
        def sle_pie_chart(self,sle_values):
           plt.pie(sle_values,labels=self.sle_graph_labels)
           plt.title("SLE STATUS")
@@ -1310,6 +1339,7 @@ class timed_report():
         self.overall_sle_values = []
 
         self.total_cost = 0
+        self.prev_week_cost = 0
         self.get_top_25_sle()
 
        def valid_selected_time(self,selected_time):
@@ -1982,10 +2012,11 @@ class MyApp(QMainWindow, Ui_QCRelease):
        return
     
     def test_report(self):
-        self.cache_rm_clicked()
+
         self.cache_test_data_values(self.configs['test_request_sheet_ID'])
         self.cache_skip_values(self.configs['skip_log_ID'])
         self.find_sle_changes()
+        month_year = convert_date_to_month_year(self.pivot_date)
         self.report_progress_bar.setValue(0)
         if self.selected_date_range == "ytd":
             months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
@@ -2007,13 +2038,74 @@ class MyApp(QMainWindow, Ui_QCRelease):
                     month_year,
                     'R'
                 )
+        if self.selected_date_range == "month":
+            months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+            converted_date = convert_between_date_formats(self.pivot_date)
+            month_num = int(converted_date.split("/")[0])
+            year = converted_date.split("/")[2]
+
+
+
+
+            month = months[month_num-1]
+            month_year = f"{month} {year}".upper()
+
+            self.cache_check_in_values(
+                self.configs['RM_check_in_sheet_ID'],
+                month_year,
+                'R'
+            )
+        if self.selected_date_range == "month":
+            months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+            converted_date = convert_between_date_formats(self.pivot_date)
+            month_num = int(converted_date.split("/")[0])
+            year = converted_date.split("/")[2]
+
+
+
+
+            month = months[month_num-1]
+            month_year = f"{month} {year}".upper()
+
+            self.cache_check_in_values(
+                self.configs['RM_check_in_sheet_ID'],
+                month_year,
+                'R'
+            )
+        if self.selected_date_range == "week":
+            months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+            converted_date = convert_between_date_formats(self.pivot_date)
+            month_num = int(converted_date.split("/")[0])
+            year = converted_date.split("/")[2]
+
+
+
+
+            month = months[month_num-1]
+            month_year = f"{month} {year}".upper()
+
+            self.cache_check_in_values(
+                self.configs['RM_check_in_sheet_ID'],
+                month_year,
+                'R'
+            )
+
+            month = months[month_num-2]
+            month_year = f"{month} {year}".upper()
+
+            self.cache_check_in_values(
+                self.configs['RM_check_in_sheet_ID'],
+                month_year,
+                'R'
+            )
+
         self.report_worker = ReportWorker(
         self.selected_date_range,
         self.pivot_date,
         self.cached_skip_values,
         self.cached_test_values,
         self.cached_RM_check_in_values,
-        convert_date_to_month_year(todays_date()),
+        month_year,
         self.configs['testing_log_sheet_ID'],
         get_test_data(
             self.configs['skip_log_ID'],
@@ -2106,7 +2198,8 @@ class MyApp(QMainWindow, Ui_QCRelease):
                 logger.info("SLE STATUSES SAVED")
 
     def fetch_sle_data(self):
-        
+        if not os.path.exists(APP_DIR / "sles.json"):
+           return {}
         save_path = APP_DIR / "sles.json"
 
         with open(save_path, "r", encoding="utf-8") as file:
@@ -2124,7 +2217,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                     "old": old_sles.get(key),
                     "new": new_sles.get(key)
                 }
-        print(changed_sles)
+
         self.changes = changed_sles
     def get_selected_cell_batch_data(self,row,column):
         selected_cell = self.batchdatatable.item(row,column)
@@ -2145,6 +2238,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
            self.timestamp_label.setText("")
        
     def cache_check_in_values(self,sheetID,month,type_material):
+
         creds = None
       # The file token.json stores the user's access and refresh tokens, and is
       # created automatically when the authorization flow completes for the first
@@ -2168,11 +2262,29 @@ class MyApp(QMainWindow, Ui_QCRelease):
         
             # Call the Sheets API
             sheet = service.spreadsheets()
+            spreadsheet = service.spreadsheets().get(
+                spreadsheetId=sheetID
+            ).execute()
+            expected_month = month.upper()
+
+            sheet_name = None
+
+            for sheet_info in spreadsheet["sheets"]:
+                title = sheet_info["properties"]["title"]
+
+                if title.upper().startswith(expected_month):
+                    sheet_name = title
+                    break
+
+            if sheet_name is None:
+                raise ValueError(f"Could not find worksheet for {month}")
+
             result = (
                 sheet.values()
-                .get(spreadsheetId=sheetID, range=month + "!A2:AF2000")
+                .get(spreadsheetId=sheetID, range=f"'{sheet_name}'!A2:AF2000")
                 .execute()
             )
+
             match type_material:
                        case 'R': #raw material
                           try:
@@ -2328,6 +2440,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
            case 'R': #raw material
               try:
                 month = month_from_batchID(batchID)
+
                 sheetData = self.cached_RM_check_in_values[month]
                 
               except Exception as e:
@@ -2351,6 +2464,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                        return 0
                  
                  month = convert_date_to_month_year(date)
+
                  sheetData = self.cached_label_check_in_values[month]
                 except Exception as e:
                     logger.debug(str(e))
@@ -2364,6 +2478,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
         try:
             for entry in sheetData['values']:
              row += 1
+
              try:
                 
 
@@ -2373,9 +2488,14 @@ class MyApp(QMainWindow, Ui_QCRelease):
                     break   
                 
                 if type_material == 'L':
+                      
+                    if len(entry) < 4:
 
-                      if entry[0].strip() == zeroless_date and entry[3].strip() == batchID:
+                        continue
+                    
+                    if convert_between_date_formats(strip_date_zeros(entry[0].strip())) == zeroless_date and entry[3].strip() == batchID:
                           raw_material_info = entry
+
                           break
              except IndexError:
               logger.exception("FATAL APPLICATION ERROR")
@@ -2748,18 +2868,18 @@ class MyApp(QMainWindow, Ui_QCRelease):
 
 
 
-    def show_checkbox_popup(self):
-        dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle("On COA")
+    def show_checkbox_popup(self,batch):
+        dialog = QtWidgets.QDialog(self)    
+        dialog.setWindowTitle(f"{batch.ingredientID} {batch.batchID} Information")
         dialog.resize(400, 150)
         layout = QtWidgets.QVBoxLayout(dialog)
 
         checkboxes = []
 
         options = [
-            "Dietary",
-            "Heavy Metals",
-            "Micros",
+            "Dietary Ingredient?",
+            "Heavy Metals on COA?",
+            "Micros on COA?",
         ]
 
         for option in options:
@@ -2779,7 +2899,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                 if checkbox.isChecked()
             ]
 
-            print(selected)
+
             return selected
 
         return []   
@@ -2818,15 +2938,15 @@ class MyApp(QMainWindow, Ui_QCRelease):
               hm = False
               rm = False
               logger.info("BATCH ID: " + batch.batchID + " SKIPPED")
-              selected = self.show_checkbox_popup()
-              if "Dietary" in selected:
+              selected = self.show_checkbox_popup(batch)
+              if "Dietary Ingredient?" in selected:
                  data.standard_request = "ID"
                  #data.request_method = "HPTLC"
                  data.request_specs = "Conforms to Reference Standard"
                  data.standard_price = 140
-              if "Heavy Metals" not in selected:
+              if "Heavy Metals on COA?" not in selected:
                  hm = True
-              if "Micros" not in selected:
+              if "Micros on COA?" not in selected:
                 rm = True
               data.skip = False
               data.heavy_metals = hm
@@ -2880,11 +3000,47 @@ class MyApp(QMainWindow, Ui_QCRelease):
 
 
 if __name__ == "__main__":
-    
-    logger = logging.getLogger(__name__)
-    logging.basicConfig(filename='debug.log', encoding='utf-8', level=logging.DEBUG)
-    logger.debug('\n' + "--APPLICATION LAUNCHED AT " + str(datetime.now()) + "--" + '\n')
-    logger.info("Version 1.0.7")
+
+    LOG_DIR = APP_DIR / "LOGS"
+    LOG_DIR.mkdir(exist_ok=True)
+
+    LOG_FILE = LOG_DIR / f"debug_{datetime.now():%Y%m%d_%H%M%S}_{os.getpid()}.log"
+
+    handler = RotatingFileHandler(
+        LOG_FILE,
+        maxBytes=5 * 1024 * 1024,  # 5 MB
+        backupCount=10,
+        encoding="utf-8"
+    )
+
+    formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+    )
+
+    handler.setFormatter(formatter)
+
+    logger = logging.getLogger()
+    logger.setLevel(logging.DEBUG)
+    logger.handlers.clear()
+    logger.addHandler(handler)
+
+    logging.getLogger("PIL").setLevel(logging.WARNING)
+    logging.getLogger("PIL.PngImagePlugin").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.INFO)
+    logging.getLogger("googleapiclient").setLevel(logging.INFO)
+    logging.getLogger("googleapiclient.discovery").setLevel(logging.INFO)
+    logging.getLogger("googleapiclient.discovery").setLevel(logging.INFO)
+    logging.getLogger("matplotlib.pyplot").setLevel(logging.WARNING)
+
+
+    logger.debug(
+        "\n--APPLICATION LAUNCHED AT "
+        + str(datetime.now())
+        + "--\n"
+    )
+
+    logger.info(f"Version {APP_VERSION}")
+
     config = read_config()
     logger.info(config)
     try:

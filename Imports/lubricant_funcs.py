@@ -40,6 +40,7 @@ def strip_date_zeros(date):
 def convert_between_date_formats(date):
     try:
         date = date.replace('-', '/')
+        date = date.replace('.','/')
 
         try:
             dt = datetime.strptime(date, "%m/%d/%Y")
@@ -72,7 +73,9 @@ def generate_first_four_digits_batch_id(type="R"):
 
 def convert_date_to_month_year(date):
    months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-   month_num = int(date[1])
+
+   month_num = int(date[0:2])
+   print(month_num)
    month = months[month_num-1]
    year = date[6:10]
    date_string = month + " " + year
@@ -82,6 +85,7 @@ def month_from_batchID(batchID):
     first_four_digits = batchID[0:4]
     year = "202" + first_four_digits[1]
     month = first_four_digits[2] + first_four_digits[3]
+
     day = "01"
     date = month + "-" + day + "-" + year
     return convert_date_to_month_year(date)   
