@@ -315,6 +315,7 @@ def install_dependencies():
         )
 
         logger.info("matplotlib installed successfully")
+
 def main():
 
     logger.info("Updater arguments: %s", sys.argv)

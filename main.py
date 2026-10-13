@@ -7,6 +7,7 @@ import os
 import subprocess
 import json
 from datetime import datetime, timedelta
+import webbrowser
 
 #GUI
 from PyQt5 import QtWidgets
@@ -54,7 +55,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 from pathlib import Path
 
-APP_VERSION = "1.3.6"
+APP_VERSION = "1.4.7"
 APP_DIR = Path(__file__).resolve().parent
 #my_path_to_label_opener = "C:/Program Files/Google/Chrome/Application/chrome.exe"
 def create_config():
@@ -71,6 +72,7 @@ def create_config():
         'RM_check_in_sheet_ID': '1EAEebDpJOGWZIe2bwn-qrQbPUS3r3rAs8tPrc7xFhC0',
         'component_check_in_sheet_ID': '1tYN6ZdOwAArKyEYd9wQ9lMBGtd0YyVgMv_PkTDalw10',
         'label_check_in_sheet_ID':'1IlMSsYDdCt9wU2oM08FMLpykfB7Y6aZzHGDIIj3LufM',
+        'FG_log_ID':'1wDSG16fxjiHDcbnh8ryEOvApvK4-Yv9SStfK4TCPY0I',
         'ssf_sheet_ID':'1omkvbp9uCnwgLqeaQ1Bx-09M7o9a09nNtjsFYU9szHQ',
         'test_request_sheet_ID':'1_mhtkm_WtaOGVH5H4-FQYV1_4656AiXUKec8m7KSKy0',
         'testing_log_sheet_ID':'1259PcgexoY4Ufqo3yBjoQTF7p_M230a2AF8O7VspkIQ',
@@ -106,7 +108,7 @@ def read_config():
     testing_log_sheet_ID = config.get('Google_IDs', 'testing_log_sheet_ID')
     label_check_in_sheet_ID = config.get('Google_IDs', 'label_check_in_sheet_ID')
     skip_log_ID = config.get('Google_IDs', 'skip_log_ID')
-    
+    FG_log_ID = config.get('Google_IDs', 'FG_log_ID')
 
     # Store retrieved values in a dictionary
     config_values = {
@@ -121,7 +123,8 @@ def read_config():
         'test_request_sheet_ID':test_request_sheet_ID,
         'testing_log_sheet_ID':testing_log_sheet_ID,
         'label_check_in_sheet_ID':label_check_in_sheet_ID,
-        'skip_log_ID':skip_log_ID
+        'skip_log_ID':skip_log_ID,
+        'FG_log_ID':FG_log_ID
     }
 
     return config_values
@@ -179,7 +182,93 @@ class search_sheet_worker(QObject):
    most_recent_request = None
    selected_request = None
    annotate = False
-   
+
+
+
+
+   def find_formula_spreadsheet(self,service, root_folder_id, number):
+        FOLDER_MIME = "application/vnd.google-apps.folder"
+        SHEET_MIME = "application/vnd.google-apps.spreadsheet"
+        number = int(number)
+
+        if number < 1:
+            raise ValueError("Formula number must be positive.")
+
+        # Find the range folder, e.g. 1519 -> Formulas 1501-2000
+        range_start = ((number - 1) // 500) * 500 + 1
+        range_end = range_start + 499
+        range_name = f"Formulas {range_start:04d} - {range_end:04d}"
+
+        def find_child(parent_id, name, mime_type):
+            query = (
+                f"name = '{name}' "
+                f"and mimeType = '{mime_type}' "
+                f"and '{parent_id}' in parents "
+                "and trashed = false"
+            )
+
+            results = service.files().list(
+                q=query,
+                pageSize=100,
+                fields="files(id, name, mimeType)",
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
+            ).execute()
+
+            return results.get("files", [])
+
+        # 1. Find the range folder
+        range_folders = find_child(
+            root_folder_id, range_name, FOLDER_MIME
+        )
+        if not range_folders:
+            raise FileNotFoundError(f"Range folder not found: {range_name}")
+
+        # 2. Find the folder for the specific number
+        number_folders = find_child(
+            range_folders[0]["id"], str(number), FOLDER_MIME
+        )
+        if not number_folders:
+            raise FileNotFoundError(f"Formula folder not found: {number}")
+
+        # 3. Find the spreadsheet inside that folder
+        spreadsheets = find_child(
+            number_folders[0]["id"], "", SHEET_MIME
+        )
+
+        # Exact-name lookup above is not appropriate for an unknown spreadsheet
+        # name, so search directly by MIME type and parent instead.
+        query = (
+            f"mimeType = '{SHEET_MIME}' "
+            f"and '{number_folders[0]['id']}' in parents "
+            "and trashed = false"
+        )
+        results = service.files().list(
+            q=query,
+            pageSize=100,
+            fields="files(id, name, mimeType)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
+        ).execute()
+
+        spreadsheets = results.get("files", [])
+        print(spreadsheets)
+        if not spreadsheets:
+            raise FileNotFoundError(
+                f"No spreadsheet found in formula folder {number}"
+            )
+
+        if len(spreadsheets) > 1:
+            raise RuntimeError(
+                f"Expected one spreadsheet in folder {number}, "
+                f"but found {len(spreadsheets)}."
+            )
+
+        spreadsheet = spreadsheets[0]
+        url = f"https://docs.google.com/spreadsheets/d/{spreadsheet['id']}/edit"
+        webbrowser.open(url)
+
+        return spreadsheet
 
    def annotate_test_data_sheet(self,given_batch_data):
      if isinstance(given_batch_data,list):
@@ -277,25 +366,52 @@ class search_sheet_worker(QObject):
             self.progress.emit(20)
             progress = 20
             logger.info("ingredientID:" + ingredientID)
-            
+            if self.type_material == 'F' and self.folder_id == "1Iikfd-BISs3jXv74PU8130DSPTI9o_2L":
+               mime_type = "application/vnd.google-apps.document"
+            elif self.type_material == 'F' and self.folder_id == "1RD9Il2wWnMONohgkbCkQ142sUfkW0zXs":
+               mime_type = 'application/vnd.google-apps.spreadsheet'
+            else:
+               mime_type = "application/pdf"
+            print(mime_type)
             query = (
             f"name contains '{ingredientID}'"
-            "and mimeType = 'application/pdf' "
+            f"and mimeType = '{mime_type}'"
             "and trashed = false"
             )  
 
+            if self.type_material == 'F':
+               folder_id = self.folder_id
+               query += f" and '{folder_id}' in parents"
+            
+            params = {"q":query,
+                        "spaces":"drive",
+                        "fields":"nextPageToken, files(id, name, mimeType, modifiedTime)",
+                        "pageToken":page_token,
+                        "includeItemsFromAllDrives":"True",
+                        "supportsAllDrives":"True",
+                        "orderBy":"modifiedTime desc"
+               
+            }
+
+            if self.type_material != 'F':
+                drive_ID = self.configs['google_drive_ID']
+                params["corpora"] = "drive"
+                params["driveId"] = drive_ID            
+               
+            if self.type_material == 'F' and self.folder_id == "1RD9Il2wWnMONohgkbCkQ142sUfkW0zXs":
+                try:
+                    self.find_formula_spreadsheet(service,self.folder_id,ingredientID[-4:])
+                except Exception as e:
+                    logger.exception(f"An error occurred: {str(e)}")
+                    self.error.emit(str(e))
+                    self.complete.emit(1,"NONE", "FAILED TO FIND TEST SHEET")
+                self.complete.emit(1,ingredientID,"FOUND TEST SHEET")
+                self.progress.emit(100)
+                return 1           
             while True:
                 results = (
                     service.files() #TODO:figure out how to efficiently find the files
-                    .list(q=query,
-                        spaces="drive",
-                        driveId = self.configs['google_drive_ID'],
-                        fields="nextPageToken, files(id, name, mimeType, modifiedTime)",
-                        pageToken=page_token,
-                        includeItemsFromAllDrives="True",
-                        corpora="drive",
-                        supportsAllDrives="True",
-                        orderBy="modifiedTime desc")
+                    .list(**params)
                     .execute()
                 )
                 
@@ -306,13 +422,14 @@ class search_sheet_worker(QObject):
                 if not page_token:
                     break
                 
-            
+
+
             for item in items[0]:
                 
                 progress += 1
                 if progress < 90: self.progress.emit(progress)
                 if item: #get only populated entries
-                    
+                    print(item)
                     
                     if requested[0][1] not in "0123456789": #labels will never match this
                         prefix = f"[{ingredientID[:3]}]"
@@ -321,9 +438,16 @@ class search_sheet_worker(QObject):
                         if not item['name'].strip().startswith(prefix):
                             
                             continue
-                    else:
+                    elif self.type_material != 'F':
                         pattern = rf"^{re.escape(ingredientID)}(?:\.pdf|\s*-\s*\d+\.pdf)$" #stolen regex hope it works
                         if not re.match(pattern, item['name'], re.IGNORECASE):
+                         logger.info("Not an exact match: " + item['name'])
+                         continue
+
+
+                    else:
+                       pattern = rf".*{re.escape(ingredientID)}.*"
+                       if not re.match(pattern, item['name'], re.IGNORECASE):
                          logger.info("Not an exact match: " + item['name'])
                          continue
                     try:
@@ -331,7 +455,19 @@ class search_sheet_worker(QObject):
                 
                         
                         file_id = item['id']
-                        
+
+                        if self.type_material == 'F' and self.folder_id == "1Iikfd-BISs3jXv74PU8130DSPTI9o_2L":
+                           url = f"https://docs.google.com/document/d/{file_id}/edit" 
+                           webbrowser.open(url)
+                           self.complete.emit(1,ingredientID,"FOUND TEST SHEET")
+                           self.progress.emit(100)
+                           return 1
+                        if self.type_material == 'F' and self.folder_id == "1RD9Il2wWnMONohgkbCkQ142sUfkW0zXs":
+                           print("here")
+                           self.find_formula_spreadsheet(service,self.folder_id,ingredientID[-4:])
+                           self.complete.emit(1,ingredientID,"FOUND TEST SHEET")
+                           self.progress.emit(100)
+                           return 1                    
                         # pylint: disable=maybe-no-member
                         request = service.files().get_media(fileId=file_id)
                         file = io.BytesIO()
@@ -366,7 +502,7 @@ class search_sheet_worker(QObject):
                     
         except HttpError as e:
             # TODO(developer) - Handle errors from drive API.
-            logger.error(f"An error occurred: {str(e)}")
+            logger.exception(f"An error occurred: {str(e)}")
             self.error.emit(str(e))
             self.complete.emit(1,"NONE", "FAILED TO FIND TEST SHEET")
         if not found: 
@@ -454,8 +590,10 @@ class ReportWorker(QThread):
 
                 month = months[month_num-2]
                 year = self.pivot_date[6:10]
-                date_string = month + " " + year
+                print(self.pivot_date)
+                date_string = month + " 20" + year
                 month_year = date_string.upper()
+                print(month_year)
                 r.get_incoming(self.check_in_data,
                                 month_year)
             self.progress.emit(30)
@@ -1353,17 +1491,17 @@ class timed_report():
        def check_valid_date(self,indate):
         try:
           date = convert_between_date_formats(strip_date_zeros(indate))
-          pivot_date = convert_between_date_formats(strip_date_zeros(self.pivot_date))
+          zeroless_pivot_date = convert_between_date_formats(strip_date_zeros(self.pivot_date))
           date_range = self.selected_time
 
           match (date_range):
             case "day":
-                if pivot_date == date:
+                if zeroless_pivot_date == date:
                    return True
                 else:
                    return False
             case "week":
-                dt = datetime.strptime(pivot_date,"%m/%d/%Y")
+                dt = datetime.strptime(zeroless_pivot_date,"%m/%d/%Y")
                 week = [
                      convert_between_date_formats(strip_date_zeros((dt - timedelta(days=dt.weekday()) + timedelta(days=i)).strftime("%m/%d/%Y")))
                      for i in range(7)
@@ -1378,7 +1516,7 @@ class timed_report():
             case "month":
                 try:
                     pivot_month = datetime.strptime(
-                        pivot_date,
+                        zeroless_pivot_date,
                         "%m/%d/%Y"
                     ).month
 
@@ -1396,7 +1534,7 @@ class timed_report():
             case "ytd":
                 try:
 
-                    if pivot_date[-2:] == date[-2:]:
+                    if zeroless_pivot_date[-2:] == date[-2:]:
 
                      return True
                     else:
@@ -1718,6 +1856,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
     cached_RM_check_in_values = {}
     cached_component_check_in_values = {}
     cached_label_check_in_values = {}
+    cached_FG_log_values = {}
     cached_test_values = []
     cached_skip_values = []
     recent_requests = []
@@ -1726,6 +1865,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
     timestamp = False
     configs = {}
     label_request_date = 0
+    rm_fg = True
 
     #run report variables
     starttime = 0
@@ -1780,8 +1920,13 @@ class MyApp(QMainWindow, Ui_QCRelease):
         self.report_date.userDateChanged.connect(self.update_pivot_date)
         self.report_progress_bar.setValue(0)
         self.labelsthread = labels_thread()
+        self.rm_button.toggled.connect(lambda: self.select_rm_fg(True))
+        self.fg_button.toggled.connect(lambda: self.select_rm_fg(False))
+        self.rm_button.setChecked(True)
        
-
+    def select_rm_fg(self,rm): #rm is true fg is false
+       self.rm_fg = rm
+       
 
     def check_update_ready(self):
         update_file = APP_DIR / "update_ready.json"
@@ -2001,7 +2146,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
         logger.info("Report finished")
         os.startfile(str(file))
     def report_error(self, error):
-        logger.error(error)
+        logger.exception(error)
         QMessageBox.critical(self, "Report Error", error)
 
     def update_pivot_date(self):
@@ -2016,7 +2161,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
         self.cache_test_data_values(self.configs['test_request_sheet_ID'])
         self.cache_skip_values(self.configs['skip_log_ID'])
         self.find_sle_changes()
-        month_year = convert_date_to_month_year(self.pivot_date)
+        
         self.report_progress_bar.setValue(0)
         if self.selected_date_range == "ytd":
             months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
@@ -2043,24 +2188,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
             converted_date = convert_between_date_formats(self.pivot_date)
             month_num = int(converted_date.split("/")[0])
             year = converted_date.split("/")[2]
-
-
-
-
-            month = months[month_num-1]
-            month_year = f"{month} {year}".upper()
-
-            self.cache_check_in_values(
-                self.configs['RM_check_in_sheet_ID'],
-                month_year,
-                'R'
-            )
-        if self.selected_date_range == "month":
-            months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
-            converted_date = convert_between_date_formats(self.pivot_date)
-            month_num = int(converted_date.split("/")[0])
-            year = converted_date.split("/")[2]
-
+            
 
 
 
@@ -2072,6 +2200,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                 month_year,
                 'R'
             )
+
         if self.selected_date_range == "week":
             months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
             converted_date = convert_between_date_formats(self.pivot_date)
@@ -2081,6 +2210,18 @@ class MyApp(QMainWindow, Ui_QCRelease):
 
 
 
+
+
+            month = months[month_num-2]
+            month_year = f"{month} {year}".upper()
+            print(month_year)
+
+            self.cache_check_in_values(
+                self.configs['RM_check_in_sheet_ID'],
+                month_year,
+                'R'
+            )
+
             month = months[month_num-1]
             month_year = f"{month} {year}".upper()
 
@@ -2090,15 +2231,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                 'R'
             )
 
-            month = months[month_num-2]
-            month_year = f"{month} {year}".upper()
-
-            self.cache_check_in_values(
-                self.configs['RM_check_in_sheet_ID'],
-                month_year,
-                'R'
-            )
-
+        print(month_year)
         self.report_worker = ReportWorker(
         self.selected_date_range,
         self.pivot_date,
@@ -2266,7 +2399,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                 spreadsheetId=sheetID
             ).execute()
             expected_month = month.upper()
-
+            
             sheet_name = None
 
             for sheet_info in spreadsheet["sheets"]:
@@ -2304,13 +2437,19 @@ class MyApp(QMainWindow, Ui_QCRelease):
                         except Exception as e:
                             logger.debug(e)
                             return 0
+                       case 'F': #finished goods
+                        try:
+                         self.cached_FG_log_values[month] = result
+                        except Exception as e:
+                            logger.debug(e)
+                            return 0                      
                        case _:
                           logger.warning("Material Type Not supported")
                           return 0
            
             
         except HttpError as e:
-            logger.error(str(e))
+            logger.exception(str(e))
             self.show_error(str(e))    
         return 0
     def cache_test_data_values(self,sheetID):
@@ -2412,7 +2551,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                                i = 0
                                for id in entry:
                                  if id == batch.batchID:
-                                   column = i
+                                   column = i - 4
                                    break
                                  i += 1   
                  except Exception as e:
@@ -2470,22 +2609,46 @@ class MyApp(QMainWindow, Ui_QCRelease):
                     logger.debug(str(e))
                     
                     return 0
+           case 'F': #finished good
+              try:
+                sheetData = self.cached_FG_log_values
+              except Exception as e:
+                  logger.debug(e)
+                  return 0
            case _:
               logger.warning("Material Type Not supported")
               return 0
         row = 0
+
         zeroless_date = convert_between_date_formats(strip_date_zeros(date))
+        if type_material == 'F':
+            try:
+                print(self.cached_FG_log_values)
+                sheets = ["PROD First Shift 2026", "PROD Second Shift 2026", "PROD Powders 2026"]
+                values = []
+                for sheet in sheets:
+                    values.extend(sheetData[sheet]['values'])
+            except Exception as e:
+               logger.exception(e)
+               return 0
+        else: values = sheetData['values'] 
+
+        print(values) 
         try:
-            for entry in sheetData['values']:
+            for entry in values:
+             
              row += 1
 
              try:
                 
 
-                if type_material != 'L' and entry[0] == batchID:
+                if type_material != 'L' and type_material != 'F' and entry[0] == batchID[0:8]:
                     
                     raw_material_info = entry
                     break   
+
+                if type_material == 'F' and entry[5] == batchID:
+                   raw_material_info = entry
                 
                 if type_material == 'L':
                       
@@ -2507,9 +2670,9 @@ class MyApp(QMainWindow, Ui_QCRelease):
         match type_material:
                    case 'R': #raw material
                        try:
-                        data = raw_material_data(raw_material_info[0],raw_material_info[1],raw_material_info[2],raw_material_info[3],raw_material_info[4],raw_material_info[5],raw_material_info[9], raw_material_info[20],row=row)
+                        data = raw_material_data(raw_material_info[0][0:8],raw_material_info[1][0:8],raw_material_info[2],raw_material_info[3],raw_material_info[4],raw_material_info[5],raw_material_info[9], raw_material_info[20],row=row)
                        except IndexError:
-                        data = raw_material_data(raw_material_info[0],raw_material_info[1],raw_material_info[2],raw_material_info[3],raw_material_info[4],raw_material_info[5],raw_material_info[9],row=row)
+                        data = raw_material_data(raw_material_info[0][0:8],raw_material_info[1][0:8],raw_material_info[2],raw_material_info[3],raw_material_info[4],raw_material_info[5],raw_material_info[9],row=row)
                        except Exception as e:
                          logger.debug(e)
                          return 0
@@ -2524,7 +2687,13 @@ class MyApp(QMainWindow, Ui_QCRelease):
                      data = raw_material_data(batchID=raw_material_info[3],ingredientID=raw_material_info[3],ingredient_name=raw_material_info[4],vendor=raw_material_info[5],vendor_lot_num=0,PO_num=raw_material_info[2],expiration_date="N/A", num_of_containers=raw_material_info[8],row=row)
                     except Exception as e:
                      logger.debug(e)
-                     return 0                      
+                     return 0       
+                   case 'F': #finished goods
+                    try:
+                     data = raw_material_data(batchID=raw_material_info[5],ingredientID=raw_material_info[1],ingredient_name=raw_material_info[3],vendor="",vendor_lot_num=0,PO_num=0,expiration_date="N/A", num_of_containers=0,row=row)
+                    except Exception as e:
+                     logger.debug(e)
+                     return 0                    
                    case _:
                       logger.warning("Material Type Not supported")
                       return 0
@@ -2687,6 +2856,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
         #renderPDF.drawToFile(drawing, filename)
         return filename
     def create_labels_clicked(self):
+       if not self.rm_fg: return
        if not self.most_recent_request:
           self.display_clicked()
        if not self.selected_request: 
@@ -2758,6 +2928,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
         self.timestamp_label.setText("")
         self.progressBar.setValue(0)
         batchID = self.batchIDinput.text().upper()
+        rm = self.rm_fg
         try:
             type_material = batchID[0]
         except Exception as e:
@@ -2773,9 +2944,11 @@ class MyApp(QMainWindow, Ui_QCRelease):
             except Exception:
                 logger.exception("FATAL APPLICATION ERROR")
             return
-        if len(batchID) >= 8:
+        if rm and len(batchID) >= 8:
             type_material = 'L'
             self.label_request_date = 0
+        if not rm:
+           type_material = 'F'
         self.progressBar.setValue(5)
         batch_data = self.search_data_from_sheet(batchID,type_material)
         self.progressBar.setValue(10)
@@ -2791,6 +2964,8 @@ class MyApp(QMainWindow, Ui_QCRelease):
                   sheetID = self.configs['component_check_in_sheet_ID'] 
                case 'L':
                     sheetID = self.configs['label_check_in_sheet_ID']
+               case 'F':
+                    sheetID = self.configs['FG_log_ID']
                case _:
                   self.recent_data_label.setText("Material Type Not Supported")
                   logger.warning("Material Type Not Supported")
@@ -2803,22 +2978,35 @@ class MyApp(QMainWindow, Ui_QCRelease):
                 if date == 0:
                     try:
                             date,ok = QInputDialog.getText(self,"Label Recieving Date","Please input the label recieving date (MM/DD/YYYY)")
+                            print(date)
                             self.label_request_date = date
                             logger.info(date)
-                            if not ok:
+                            if not ok or not date:
                              logger.info("USER CANCELLED LABEL REQUEST")
                              return 0
+                            month = convert_date_to_month_year(date)
                 
                             
                     except Exception as e:
-                        logger.error(str(e))
+                        logger.exception(str(e))
                         self.show_error("ERROR IN INPUT")
                         return
-                month = convert_date_to_month_year(date)
+                
+            elif type_material == 'F': 
+               sheets = ["PROD First Shift 2026", "PROD Second Shift 2026", "PROD Powders 2026"]
+               for sheet in sheets:
+                  self.cache_check_in_values(sheetID,sheet,type_material)
             else: month = month_from_batchID(batchID)
+            if type_material == 'L' and not date:
+                logger.info("USER CANCELLED LABEL REQUEST")
+                self.progressBar.setValue(0)
+                self.recent_data_label.setText("USER CANCELLED LABEL REQUEST")
+                return 0
             self.progressBar.setValue(20)
-            self.cache_check_in_values(sheetID,month,type_material)
+
+            if rm:self.cache_check_in_values(sheetID,month,type_material)
             self.progressBar.setValue(30)
+            print("here")
             batch_data=self.search_data_from_sheet(batchID,type_material)
             self.progressBar.setValue(40)
         if batch_data == 0:
@@ -2853,11 +3041,15 @@ class MyApp(QMainWindow, Ui_QCRelease):
             self.recent_data_label.setText("Could not find batch data")
             logger.warning("Could not find batch data")
             return
-       if len(batchID) >= 9:
+       if len(batchID) >= 9 and self.rm_fg:
             type_material = 'L'
+       if not self.rm_fg:
+          type_material = 'F'
        self.search_sheet_worker.most_recent_request = self.search_data_from_sheet(batchID,type_material)
+       self.search_sheet_worker.folder_id = "1Iikfd-BISs3jXv74PU8130DSPTI9o_2L"
        self.search_sheet_worker.selected_request = self.selected_request
        self.search_sheet_worker.annotate = self.annotate
+       self.search_sheet_worker.type_material = type_material
        self.search_sheet_worker.error.connect(self.show_error)
        self.search_sheet_worker.progress.connect(self.update_test_sheet_progress_bar)
        self.search_sheet_worker.complete.connect(self.kill_search_thread)
@@ -2865,6 +3057,21 @@ class MyApp(QMainWindow, Ui_QCRelease):
        self.search_sheet_thread.started.connect(self.search_sheet_worker.find_test_data_sheet)
        self.search_sheet_worker.moveToThread(self.search_sheet_thread)
        self.search_sheet_thread.start()
+
+       if type_material == 'F':
+        self.search_sheet_worker1 = search_sheet_worker()
+        self.search_sheet_worker1.most_recent_request = self.search_data_from_sheet(batchID,type_material)
+        self.search_sheet_worker1.folder_id = "1RD9Il2wWnMONohgkbCkQ142sUfkW0zXs"
+        self.search_sheet_worker1.selected_request = self.selected_request
+        self.search_sheet_worker1.annotate = self.annotate
+        self.search_sheet_worker1.type_material = type_material
+        self.search_sheet_worker1.error.connect(self.show_error)
+        self.search_sheet_worker1.progress.connect(self.update_test_sheet_progress_bar)
+        self.search_sheet_worker1.complete.connect(self.kill_search_thread)
+        self.search_sheet_thread1 = QThread()
+        self.search_sheet_thread1.started.connect(self.search_sheet_worker1.find_test_data_sheet)
+        self.search_sheet_worker1.moveToThread(self.search_sheet_thread1)
+        self.search_sheet_thread1.start()
 
 
 
@@ -2961,6 +3168,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
           self.tustinbar.setValue(math.floor(progress))
           i+=1
           price = 0
+          data.print_data()
           if data.heavy_metals:
             price += self.heavy_metals_price
             if data.routine_micros:

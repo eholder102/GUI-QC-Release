@@ -57,7 +57,7 @@ def skip_value_by_column(column):
     test_columns = [6,9,13,18]
     if column > 18 or (column > 5 and column not in test_columns):
         return True
-    if column in test_columns or column < 5:
+    if column in test_columns or column <= 5:
         return False
     
 def todays_date():

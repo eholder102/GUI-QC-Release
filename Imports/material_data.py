@@ -89,9 +89,9 @@ class material_data:
       logger.info("Vendor: " + self.vendor)
       logger.info("Vendor Lot Number: " + self.vendor_lot_num)
       logger.info("Expiration Date: " + self.expiration_date)
-      logger.info("Number of containers: " + self.num_of_containers)
+      logger.info("Number of containers: " + str(self.num_of_containers))
       logger.info("Duplicate lot: " + self.is_duplicate_lot)
-      logger.info("PO #: " + self.PO_num)
+      logger.info("PO #: " + str(self.PO_num))
       return
    def list_form(self):
       return [self.batchID,self.ingredientID,self.ingredient_name,self.vendor,self.vendor_lot_num,self.expiration_date,self.num_of_containers,self.is_duplicate_lot,self.PO_num]
