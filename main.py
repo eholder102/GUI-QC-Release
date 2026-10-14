@@ -189,7 +189,7 @@ class search_sheet_worker(QObject):
    def find_formula_spreadsheet(self,service, root_folder_id, number):
         FOLDER_MIME = "application/vnd.google-apps.folder"
         SHEET_MIME = "application/vnd.google-apps.spreadsheet"
-        number = int(number)
+        number = sanitized_to_int(number)
 
         if number < 1:
             raise ValueError("Formula number must be positive.")
@@ -575,7 +575,7 @@ class ReportWorker(QThread):
             if r.selected_time == "ytd":
                 months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
                 
-                month_num = int(self.pivot_date[0:2])
+                month_num = sanitized_to_int(self.pivot_date[0:2])
                 for i in range(month_num):
                     month = months[i]
                     year = self.pivot_date[6:10]
@@ -586,7 +586,7 @@ class ReportWorker(QThread):
             if r.selected_time == "week":
                 months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
                 
-                month_num = int(self.pivot_date[0:2])
+                month_num = sanitized_to_int(self.pivot_date[0:2])
 
                 month = months[month_num-2]
                 year = self.pivot_date[6:10]
@@ -640,7 +640,7 @@ class ReportWorker(QThread):
     def pdf_progress(self, value):
 
         # PDF is 70-100% of total operation
-        overall_progress = 70 + int(value * 0.30)
+        overall_progress = 70 + sanitized_to_int(value * 0.30)
 
         self.progress.emit(overall_progress)     
 
@@ -1419,7 +1419,7 @@ class timed_report():
        def read_prev_total_cost(self):
           try:
             with open(APP_DIR / "prev_cost_estimate.txt",'r') as file:
-                self.prev_week_cost = int(file.read())
+                self.prev_week_cost = sanitized_to_int(file.read())
           except:
              logger.exception("Error in reading previous week cost")
              self.prev_week_cost = 0 
@@ -1596,7 +1596,7 @@ class timed_report():
                  
                  data = td(ingredientID=entry[0],ingredient_name=entry[1],heavy_metals=yes_no_to_bool(entry[2]),routine_micros=yes_no_to_bool(entry[3]),standard_request=entry[4],request_method = entry[5],request_specs = entry[6],standard_price=price,skip=skip_value)
                  
-                 self.total_cost += int(data.standard_price)
+                 self.total_cost += sanitized_to_int(data.standard_price)
                  
                  return data
        
@@ -1607,7 +1607,7 @@ class timed_report():
              try:
                  if entry[2].strip() == ingredientID.strip() and entry[3].strip() == vendor.strip():
 
-                    return int(entry[0])
+                    return sanitized_to_int(entry[0])
              except IndexError:
                 pass
                 
@@ -2169,7 +2169,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
         
 
             converted_date = convert_between_date_formats(self.pivot_date)
-            month_num = int(converted_date.split("/")[0])
+            month_num = sanitized_to_int(converted_date.split("/")[0])
             year = converted_date.split("/")[2]
 
 
@@ -2186,7 +2186,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
         if self.selected_date_range == "month":
             months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
             converted_date = convert_between_date_formats(self.pivot_date)
-            month_num = int(converted_date.split("/")[0])
+            month_num = sanitized_to_int(converted_date.split("/")[0])
             year = converted_date.split("/")[2]
             
 
@@ -2204,7 +2204,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
         if self.selected_date_range == "week":
             months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
             converted_date = convert_between_date_formats(self.pivot_date)
-            month_num = int(converted_date.split("/")[0])
+            month_num = sanitized_to_int(converted_date.split("/")[0])
             year = converted_date.split("/")[2]
 
 
@@ -2319,7 +2319,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                   if len(entry) < 4: continue
                   try:  
                     title = entry[2] + " " + entry[3]
-                    sles[title] = int(entry[0])
+                    sles[title] = sanitized_to_int(entry[0])
                   except Exception as e:
                         logger.exception(e)
                         logger.exception("Could not save SLE statuses")
@@ -2881,7 +2881,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
             case 'R':
                 
                 filename = self.create_labels_rm(batch_data)
-                if int(batch_data.num_of_containers) <= 100:
+                if sanitized_to_int(batch_data.num_of_containers) <= 100:
                     self.create_labels_label.setText("Labels created in " + filename + '\n' + "Print " + batch_data.num_of_containers + " labels")
                 else: 
                     self.create_labels_label.setText("Labels created in " + filename + '\n' + "WARNING: " + batch_data.num_of_containers + " LABELS REQUESTED. ASK FOR CLARITY.")
@@ -2891,7 +2891,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                     self.timestamp_label.setText("Sample Timestamped")
             case 'P':
                 filename = self.create_labels_comp(batch_data) 
-                if int(batch_data.num_of_containers) <= 100:
+                if sanitized_to_int(batch_data.num_of_containers) <= 100:
                     self.create_labels_label.setText("Labels created in " + filename + '\n' + "Print " + batch_data.num_of_containers + " labels")
                 else: 
                     self.create_labels_label.setText("Labels created in " + filename + '\n' + "WARNING: " + batch_data.num_of_containers + " LABELS REQUESTED. ASK FOR CLARITY.")
@@ -2901,7 +2901,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                     self.timestamp_label.setText("Sample Timestamped")
             case 'L':
                 filename = self.create_labels_labels(batch_data) 
-                if int(batch_data.num_of_containers) <= 100:
+                if sanitized_to_int(batch_data.num_of_containers) <= 100:
                     self.create_labels_label.setText("Labels created in " + filename + '\n' + "Print " + batch_data.num_of_containers + " labels")
                 else: 
                     self.create_labels_label.setText("Labels created in " + filename + '\n' + "WARNING: " + batch_data.num_of_containers + " LABELS REQUESTED. ASK FOR CLARITY.")
@@ -3174,7 +3174,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
             if data.routine_micros:
                 price += self.routine_micros_price
                 if data.standard_request != "PENDING":
-                    if data.standard_price != "PENDING": price += int(data.standard_price)
+                    if data.standard_price != "PENDING": price += sanitized_to_int(data.standard_price)
                     self.tests_requested.append([batch.batchID + " " + batch.ingredientID + " ", "REQUESTED HEAVY METALS, ROUTINE MICROS, AND " + data.standard_request + " BY METHOD OF " + data.request_method + " FOR AN ESTIMATED TOTAL PRICE OF $" + str(price)])
                 else:
                     self.tests_requested.append([batch.batchID + " " + batch.ingredientID + " ", "REQUESTED HEAVY METALS, AND ROUTINE MICROS FOR AN ESTIMATED TOTAL PRICE OF $" + str(price)])
@@ -3184,7 +3184,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
              self.tests_requested.append([batch.batchID + " " + batch.ingredientID + " ", "REQUESTED HEAVY METALS, FOR AN ESTIMATED TOTAL PRICE OF $" + str(price)])
           else:
              self.tests_requested.append([batch.batchID + " " + batch.ingredientID + " ", "NO HEAVY METALS REQUESTED"])
-          self.total_price_of_tests += int(price)
+          self.total_price_of_tests += sanitized_to_int(price)
           self.remove_test_item(self.to_be_tested.index(entry))
           self.update_test_table()
        self.tustinbar.setValue(100)
@@ -3248,8 +3248,11 @@ if __name__ == "__main__":
     )
 
     logger.info(f"Version {APP_VERSION}")
-
-    config = read_config()
+    try:
+        config = read_config()
+    except Exception as e:
+       logger.exception(e)
+       logger.error("Error reading config.ini. Delete to regenerate")
     logger.info(config)
     try:
         app = QApplication(sys.argv)

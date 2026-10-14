@@ -89,3 +89,10 @@ def month_from_batchID(batchID):
     day = "01"
     date = month + "-" + day + "-" + year
     return convert_date_to_month_year(date)   
+
+def sanitized_to_int(in_string):
+    try:
+        val = int(in_string)
+    except:
+        val = 0
+    return val
