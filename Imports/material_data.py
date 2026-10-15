@@ -56,7 +56,7 @@ class run_report:
 
 class test_data:
    sle = 0
-   def __init__(self, ingredientID, ingredient_name, heavy_metals=True, routine_micros=True, standard_request="",request_method = "", request_specs = "",standard_price=0,skip=False):
+   def __init__(self, ingredientID, ingredient_name, heavy_metals=True, routine_micros=True, standard_request="",request_method = "", request_specs = "",standard_price=0,skip=False,rm_fg = True):
          self.ingredientID = ingredientID
          self.ingredient_name = ingredient_name
          self.heavy_metals = heavy_metals
@@ -66,11 +66,12 @@ class test_data:
          self.skip = skip
          self.request_method = request_method
          self.request_specs = request_specs
+         self.rm_fg = rm_fg
    def print_data(self):
        print([self.ingredientID,self.ingredient_name,self.heavy_metals,self.routine_micros,self.standard_request,self.standard_price,self.skip,self.request_method,self.request_specs])
         
 class material_data:
-   def __init__(self,batchID, ingredientID, ingredient_name, vendor, vendor_lot_num, expiration_date,num_of_containers, is_duplicate_lot="NO", PO_num = "0",row = 0):
+   def __init__(self,batchID, ingredientID, ingredient_name, vendor, vendor_lot_num, expiration_date,num_of_containers, is_duplicate_lot="NO", PO_num = "0",row = 0,type_material = 'R'):
       self.batchID = batchID
       self.ingredientID = ingredientID
       self.ingredient_name = ingredient_name
@@ -81,6 +82,7 @@ class material_data:
       self.is_duplicate_lot = is_duplicate_lot
       self.PO_num = PO_num
       self.row = row
+      self.type_material = type_material
 
    def print_data(self):
       logger.info("Batch Number: " + self.batchID)
@@ -94,10 +96,10 @@ class material_data:
       logger.info("PO #: " + str(self.PO_num))
       return
    def list_form(self):
-      return [self.batchID,self.ingredientID,self.ingredient_name,self.vendor,self.vendor_lot_num,self.expiration_date,self.num_of_containers,self.is_duplicate_lot,self.PO_num]
+      return [self.batchID,self.ingredientID,self.ingredient_name,self.vendor,self.vendor_lot_num,self.expiration_date,self.num_of_containers,self.is_duplicate_lot,self.PO_num,self.type_material]
 
        
 
 def list_form_to_class_form(batch_data_list):
-   a,b,c,d,e,f,g,h,i = batch_data_list
-   return material_data(a,b,c,d,e,f,g,h,i)
+   a,b,c,d,e,f,g,h,i,j = batch_data_list
+   return material_data(a,b,c,d,e,f,g,h,i,type_material=j)

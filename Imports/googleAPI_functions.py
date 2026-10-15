@@ -119,6 +119,11 @@ def write_to_ssf(batch_data,test_data, ssf_sheetID, test_log_sheetID, row_num=11
        special_instructions = "Refer to attached specification sheet & supplier COA"
     else:
        special_instructions = "Refer to attached specification sheet & supplier COA / PROBIOTIC"
+    print(test_data.rm_fg)
+    if test_data.rm_fg:
+       sample_type = "RM"
+    else:
+       sample_type = "FG"
     range_name = "TRF!B" + str(row_num)
     creds = None
     if os.path.exists("sheetstoken.json"):
@@ -145,7 +150,7 @@ def write_to_ssf(batch_data,test_data, ssf_sheetID, test_log_sheetID, row_num=11
             test_data.ingredientID + "-" + test_data.ingredient_name,
             batchID,
             hm + test_name,
-            "RM",
+            sample_type,
             test_method,
             specs,
             "YES",

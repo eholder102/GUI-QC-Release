@@ -55,7 +55,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 from pathlib import Path
 
-APP_VERSION = "1.4.7"
+APP_VERSION = "1.5.8"
 APP_DIR = Path(__file__).resolve().parent
 #my_path_to_label_opener = "C:/Program Files/Google/Chrome/Application/chrome.exe"
 def create_config():
@@ -72,12 +72,14 @@ def create_config():
         'RM_check_in_sheet_ID': '1EAEebDpJOGWZIe2bwn-qrQbPUS3r3rAs8tPrc7xFhC0',
         'component_check_in_sheet_ID': '1tYN6ZdOwAArKyEYd9wQ9lMBGtd0YyVgMv_PkTDalw10',
         'label_check_in_sheet_ID':'1IlMSsYDdCt9wU2oM08FMLpykfB7Y6aZzHGDIIj3LufM',
-        'FG_log_ID':'1wDSG16fxjiHDcbnh8ryEOvApvK4-Yv9SStfK4TCPY0I',
+        'FG_log_ID':'1GNJwrCMe61UgUW3gZYEnxh-3ska1MsBgY0vH7bo9Et8',
         'ssf_sheet_ID':'1omkvbp9uCnwgLqeaQ1Bx-09M7o9a09nNtjsFYU9szHQ',
-        'test_request_sheet_ID':'1_mhtkm_WtaOGVH5H4-FQYV1_4656AiXUKec8m7KSKy0',
+        'rm_test_request_sheet_ID':'1_mhtkm_WtaOGVH5H4-FQYV1_4656AiXUKec8m7KSKy0',
         'testing_log_sheet_ID':'1259PcgexoY4Ufqo3yBjoQTF7p_M230a2AF8O7VspkIQ',
         'google_drive_ID':'0AItqRy9P8sAQUk9PVA',
-        'skip_log_ID':'1_mhtkm_WtaOGVH5H4-FQYV1_4656AiXUKec8m7KSKy0'
+        'rm_skip_log_ID':'1_mhtkm_WtaOGVH5H4-FQYV1_4656AiXUKec8m7KSKy0',
+        'fg_test_request_sheet_ID':'13WDsoTJ5Iwn7ftV-tHEmZNM2yGoSpPnBOieyDLHMQP8',
+        'fg_skip_log_ID':'13WDsoTJ5Iwn7ftV-tHEmZNM2yGoSpPnBOieyDLHMQP8'
     }
     # Write the configuration to a file
     with open('config.ini', 'w') as configfile:
@@ -104,12 +106,13 @@ def read_config():
     annotated_temp_test_sheet = config.get('General', 'annotated_temp_test_sheet')
     path_to_label_opener = config.get('General', 'path_to_label_opener')
     ssf_sheet_ID = config.get('Google_IDs', 'ssf_sheet_ID')
-    test_request_sheet_ID = config.get('Google_IDs', 'test_request_sheet_ID')
+    rm_test_request_sheet_ID = config.get('Google_IDs', 'rm_test_request_sheet_ID')
     testing_log_sheet_ID = config.get('Google_IDs', 'testing_log_sheet_ID')
     label_check_in_sheet_ID = config.get('Google_IDs', 'label_check_in_sheet_ID')
-    skip_log_ID = config.get('Google_IDs', 'skip_log_ID')
+    rm_skip_log_ID = config.get('Google_IDs', 'rm_skip_log_ID')
     FG_log_ID = config.get('Google_IDs', 'FG_log_ID')
-
+    fg_test_request_sheet_ID = config.get('Google_IDs', 'fg_test_request_sheet_ID')
+    fg_skip_log_ID = config.get('Google_IDs', 'fg_skip_log_ID')
     # Store retrieved values in a dictionary
     config_values = {
         'initials': initials,
@@ -120,11 +123,13 @@ def read_config():
         'annotated_temp_test_sheet': annotated_temp_test_sheet,
         'path_to_label_opener': path_to_label_opener,
         'ssf_sheet_ID':ssf_sheet_ID,
-        'test_request_sheet_ID':test_request_sheet_ID,
+        'rm_test_request_sheet_ID':rm_test_request_sheet_ID,
         'testing_log_sheet_ID':testing_log_sheet_ID,
         'label_check_in_sheet_ID':label_check_in_sheet_ID,
-        'skip_log_ID':skip_log_ID,
-        'FG_log_ID':FG_log_ID
+        'rm_skip_log_ID':rm_skip_log_ID,
+        'FG_log_ID':FG_log_ID,
+        'fg_test_request_sheet_ID': fg_test_request_sheet_ID,
+        'fg_skip_log_ID':fg_skip_log_ID
     }
 
     return config_values
@@ -252,7 +257,7 @@ class search_sheet_worker(QObject):
         ).execute()
 
         spreadsheets = results.get("files", [])
-        print(spreadsheets)
+        #print(spreadsheets)
         if not spreadsheets:
             raise FileNotFoundError(
                 f"No spreadsheet found in formula folder {number}"
@@ -372,7 +377,7 @@ class search_sheet_worker(QObject):
                mime_type = 'application/vnd.google-apps.spreadsheet'
             else:
                mime_type = "application/pdf"
-            print(mime_type)
+            #print(mime_type)
             query = (
             f"name contains '{ingredientID}'"
             f"and mimeType = '{mime_type}'"
@@ -429,7 +434,7 @@ class search_sheet_worker(QObject):
                 progress += 1
                 if progress < 90: self.progress.emit(progress)
                 if item: #get only populated entries
-                    print(item)
+                    #print(item)
                     
                     if requested[0][1] not in "0123456789": #labels will never match this
                         prefix = f"[{ingredientID[:3]}]"
@@ -463,7 +468,7 @@ class search_sheet_worker(QObject):
                            self.progress.emit(100)
                            return 1
                         if self.type_material == 'F' and self.folder_id == "1RD9Il2wWnMONohgkbCkQ142sUfkW0zXs":
-                           print("here")
+                           #print("here")
                            self.find_formula_spreadsheet(service,self.folder_id,ingredientID[-4:])
                            self.complete.emit(1,ingredientID,"FOUND TEST SHEET")
                            self.progress.emit(100)
@@ -590,10 +595,10 @@ class ReportWorker(QThread):
 
                 month = months[month_num-2]
                 year = self.pivot_date[6:10]
-                print(self.pivot_date)
+                #print(self.pivot_date)
                 date_string = month + " 20" + year
                 month_year = date_string.upper()
-                print(month_year)
+                #print(month_year)
                 r.get_incoming(self.check_in_data,
                                 month_year)
             self.progress.emit(30)
@@ -1563,7 +1568,7 @@ class timed_report():
                  logger.error(e)
               if test_data == 0:
                  logger.info("COULD NOT FIND TEST DATA IN CACHE. RECACHING...")
-                 self.test_data(self.configs['test_request_sheet_ID'])
+                 self.test_data(self.configs['rm_test_request_sheet_ID'])
                  
                 
               i = 0
@@ -1866,6 +1871,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
     configs = {}
     label_request_date = 0
     rm_fg = True
+    config_regenerated = False
 
     #run report variables
     starttime = 0
@@ -1923,6 +1929,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
         self.rm_button.toggled.connect(lambda: self.select_rm_fg(True))
         self.fg_button.toggled.connect(lambda: self.select_rm_fg(False))
         self.rm_button.setChecked(True)
+
        
     def select_rm_fg(self,rm): #rm is true fg is false
        self.rm_fg = rm
@@ -2158,8 +2165,8 @@ class MyApp(QMainWindow, Ui_QCRelease):
     
     def test_report(self):
 
-        self.cache_test_data_values(self.configs['test_request_sheet_ID'])
-        self.cache_skip_values(self.configs['skip_log_ID'])
+        self.cache_test_data_values(self.configs['rm_test_request_sheet_ID'])
+        self.cache_skip_values(self.configs['rm_skip_log_ID'])
         self.find_sle_changes()
         
         self.report_progress_bar.setValue(0)
@@ -2214,7 +2221,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
 
             month = months[month_num-2]
             month_year = f"{month} {year}".upper()
-            print(month_year)
+            #print(month_year)
 
             self.cache_check_in_values(
                 self.configs['RM_check_in_sheet_ID'],
@@ -2231,7 +2238,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                 'R'
             )
 
-        print(month_year)
+        #print(month_year)
         self.report_worker = ReportWorker(
         self.selected_date_range,
         self.pivot_date,
@@ -2241,7 +2248,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
         month_year,
         self.configs['testing_log_sheet_ID'],
         get_test_data(
-            self.configs['skip_log_ID'],
+            self.configs['rm_skip_log_ID'],
             "SLE Status",
             "!A25:C30"
         )['values'],
@@ -2282,9 +2289,9 @@ class MyApp(QMainWindow, Ui_QCRelease):
               self.show_error(e)
     def cache_test_clicked(self):
            try:
-            self.cache_test_data_values(self.configs['test_request_sheet_ID'])
+            self.cache_test_data_values(self.configs['rm_test_request_sheet_ID'])
             QMessageBox.information(self,"Done","Test data values cached successfully.")
-            self.cache_skip_values(self.configs['skip_log_ID'])
+            self.cache_skip_values(self.configs['rm_skip_log_ID'])
             QMessageBox.information(self,"Done","Skip data values cached successfully.")
            except Exception as e:
               logger.exception("Test Cache Failed")
@@ -2467,6 +2474,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
        if isinstance(cache, str):
           logger.error(cache)
        elif isinstance(cache,list):
+          #print(cache)
           self.cached_skip_values = cache
        else:
           logger.error("Error in caching skip values")
@@ -2486,7 +2494,8 @@ class MyApp(QMainWindow, Ui_QCRelease):
           logger.error(e)
        if test_data == 0:
           logger.info("COULD NOT FIND TEST DATA IN CACHE. RECACHING...")
-          self.cache_test_data_values(self.configs['test_request_sheet_ID'])
+          self.cache_test_data_values(self.configs['rm_test_request_sheet_ID'])
+          self.cache_test_data_values(self.configs['fg_test_request_sheet_ID'])
           
          
        i = 0
@@ -2523,12 +2532,18 @@ class MyApp(QMainWindow, Ui_QCRelease):
               
               column = None
               try:
-              
+               if batch.type_material == 'R':
+                column2 = batch.vendor
+                id = batch.batchID
+               elif batch.type_material == 'F':
+                  column2 = batch.ingredientID
+                  id = batch.batchID[5:12]
                for entry in self.cached_skip_values:
-                    
-                    if entry[2] == batch.ingredientID and entry[3] == batch.vendor:
+                    print(entry)
+                    if entry[2] == batch.ingredientID and entry[3] == column2:
                        i = 0
                        for id in entry:
+                          print(id)
                           if id == batch.batchID:
                            column = i
                            break
@@ -2543,7 +2558,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                   
               if str(skip_data) == "Not Found":
                  logger.info("COULD NOT FIND SKIP DATA IN CACHE. RECACHING...")
-                 self.cache_skip_values(self.configs['skip_log_ID'])
+                 self.cache_skip_values(self.configs['rm_skip_log_ID'])
                  try:
                         for entry in self.cached_skip_values:
                                             
@@ -2623,7 +2638,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
         zeroless_date = convert_between_date_formats(strip_date_zeros(date))
         if type_material == 'F':
             try:
-                print(self.cached_FG_log_values)
+                #print(self.cached_FG_log_values)
                 sheets = ["PROD First Shift 2026", "PROD Second Shift 2026", "PROD Powders 2026"]
                 values = []
                 for sheet in sheets:
@@ -2633,7 +2648,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                return 0
         else: values = sheetData['values'] 
 
-        print(values) 
+        #print(values) 
         try:
             for entry in values:
              
@@ -2690,7 +2705,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                      return 0       
                    case 'F': #finished goods
                     try:
-                     data = raw_material_data(batchID=raw_material_info[5],ingredientID=raw_material_info[1],ingredient_name=raw_material_info[3],vendor="",vendor_lot_num=0,PO_num=0,expiration_date="N/A", num_of_containers=0,row=row)
+                     data = raw_material_data(batchID=raw_material_info[5],ingredientID=raw_material_info[1],ingredient_name=raw_material_info[3],vendor=raw_material_info[1][0:3],vendor_lot_num=0,PO_num=0,expiration_date="N/A", num_of_containers=0,row=row)
                     except Exception as e:
                      logger.debug(e)
                      return 0                    
@@ -2704,7 +2719,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
        table.setColumnCount(10)
        table.setHorizontalHeaderLabels(["Batch ID", "Ingredient ID", "Name", "Vendor", "Vendor Lot #", "Expiration Date", "# Containers", "Duplicate Lot", "PO #", "Remove?"])
 
-       for i, ([batchID,ingredientID,name,vendor,vendornum,expdate,numcontainers,duplot,ponum]) in enumerate(self.recent_requests):
+       for i, ([batchID,ingredientID,name,vendor,vendornum,expdate,numcontainers,duplot,ponum,type_material]) in enumerate(self.recent_requests):
           batch = QTableWidgetItem(batchID)
           ingredient = QTableWidgetItem(ingredientID)
           item_name = QTableWidgetItem(name)
@@ -2746,7 +2761,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
            table.setColumnCount(4)
            table.setHorizontalHeaderLabels(["Batch ID", "Ingredient ID","Name","Remove?"])
     
-           for i, ([batchID,ingredientID,name,vendor,vendornum,expdate,numcontainers,duplot,ponum]) in enumerate(self.to_be_tested):
+           for i, ([batchID,ingredientID,name,vendor,vendornum,expdate,numcontainers,duplot,ponum,type_material]) in enumerate(self.to_be_tested):
               batch = QTableWidgetItem(batchID)
               ingredient = QTableWidgetItem(ingredientID)
               item_name = QTableWidgetItem(name)
@@ -2978,7 +2993,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
                 if date == 0:
                     try:
                             date,ok = QInputDialog.getText(self,"Label Recieving Date","Please input the label recieving date (MM/DD/YYYY)")
-                            print(date)
+                            #print(date)
                             self.label_request_date = date
                             logger.info(date)
                             if not ok or not date:
@@ -3006,7 +3021,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
 
             if rm:self.cache_check_in_values(sheetID,month,type_material)
             self.progressBar.setValue(30)
-            print("here")
+            #print("here")
             batch_data=self.search_data_from_sheet(batchID,type_material)
             self.progressBar.setValue(40)
         if batch_data == 0:
@@ -3018,6 +3033,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
         batch_data.print_data()
         self.batches_searched.append([batchID + " ",batch_data.ingredientID + " ","FOUND SUCCESSFULLY"])
         pyperclip.copy(batch_data.ingredientID + " " + batch_data.batchID + " " + todays_date())
+        batch_data.type_material = type_material
         self.most_recent_request = batch_data
         self.write_batch_to_file()
         self.progressBar.setValue(50)
@@ -3118,7 +3134,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
        self.tustinbar.setValue(0)
        progress_chunk = 50/8
        dummy_batch = raw_material_data("","","","","","","","","","")
-       dummy_test_data = td("","","","","","","","","")
+       dummy_test_data = td("","","",True,"","","","","")
        for i in range(8): #erase previous SSF entries
         progress = (i+1)*progress_chunk
         write_to_ssf(dummy_batch,dummy_test_data,self.configs["ssf_sheet_ID"],self.configs["testing_log_sheet_ID"],11+i,blank=True)
@@ -3129,8 +3145,27 @@ class MyApp(QMainWindow, Ui_QCRelease):
           if i > 7:
              return
           batch = list_form_to_class_form(entry)
+          if batch.type_material != 'R' and batch.type_material != 'F': continue
           progress = 50+(i+1)*progress_chunk
+          tmp_ingredient_ID = batch.ingredientID
+          if batch.type_material == 'R':
+             rm = True
+             test_data_sheet = self.configs['rm_test_request_sheet_ID']
+             skip_log_sheet = self.configs['rm_skip_log_ID']
+          elif batch.type_material == 'F':
+             rm = False
+             test_data_sheet = self.configs['fg_test_request_sheet_ID']
+             skip_log_sheet = self.configs['fg_skip_log_ID']
+             batch.ingredientID = batch.ingredientID[-4:]
+          #print(skip_log_sheet)
+          self.cache_test_data_values(test_data_sheet)
+          self.cache_skip_values(skip_log_sheet)
           data = self.search_test_data(batch)
+          if batch.type_material == 'F': 
+             batch.ingredientID = tmp_ingredient_ID #save and restore ID
+             data.rm_fg = False
+          if data == 0:
+             data = td(ingredientID=batch.ingredientID,ingredient_name=batch.ingredient_name,heavy_metals=True,routine_micros=True,standard_request="",standard_price="",skip=False,rm_fg=rm)
           if yes_no_to_bool(batch.is_duplicate_lot):
               self.tests_requested.append([batch.batchID + " " + batch.ingredientID + " ", "TEST SKIPPED DUE TO LOT DUPLICATION"])
               logger.info("BATCH ID: " + batch.batchID + " SKIPPED DUE TO LOT DUPLICATION")
@@ -3138,8 +3173,17 @@ class MyApp(QMainWindow, Ui_QCRelease):
               self.remove_test_item(self.to_be_tested.index(entry))
               self.update_test_table()
               continue
-          if data == 0:
-             data = td(ingredientID=batch.ingredientID,ingredient_name=batch.ingredient_name,heavy_metals=True,routine_micros=True,standard_request="",standard_price="",skip=False)
+          arl_brands = ['ROS','KLO','ALE']
+          #print(batch.vendor)
+          if batch.vendor in arl_brands or not data.routine_micros:
+              self.tests_requested.append([batch.batchID + " " + batch.ingredientID + " ", "SEND TO ARL"])
+              logger.info("BATCH ID: " + batch.batchID + " SKIPPED, SEND TO ARL")
+              self.show_error("BATCH ID: " + batch.batchID + " SKIPPED, MUST BE SENT TO ARL")
+              self.remove_test_item(self.to_be_tested.index(entry))
+              self.update_test_table()
+              continue
+
+
           result = write_to_ssf(batch,data,self.configs["ssf_sheet_ID"],self.configs["testing_log_sheet_ID"],11+i)
           if result == "SKIPPED":
               hm = False
@@ -3246,22 +3290,30 @@ if __name__ == "__main__":
         + str(datetime.now())
         + "--\n"
     )
-
+    config_regenerated = False
     logger.info(f"Version {APP_VERSION}")
     try:
         config = read_config()
     except Exception as e:
        logger.exception(e)
-       logger.error("Error reading config.ini. Delete to regenerate")
+       logger.error("Error reading config.ini. Deleting to regenerate")
+       os.remove(APP_DIR / "config.ini")
+       try:
+          config_regenerated = True
+          config = read_config()
+       except Exception as e:
+        logger.exception(e)
+        logger.error("Persistent error reading config.ini.")
     logger.info(config)
     try:
         app = QApplication(sys.argv)
         app.setWindowIcon(QIcon(str(APP_DIR / "jetpack_icon.ico")))
         window = MyApp()
-        
-       
+        window.config_regenerated = config_regenerated
         window.configs = config
         window.show()
+        if window.config_regenerated:
+           window.show_error("Config file regenerated. Please re-edit any custom configs")
         check_for_updates()
         update_timer = QTimer()
         update_timer.timeout.connect(window.check_update_ready)
