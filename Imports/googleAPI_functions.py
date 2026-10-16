@@ -58,10 +58,10 @@ def timestamp_sample(
         .batchUpdate(spreadsheetId=sheetID, body=body)
         .execute()
     )
-    print(f"{(result.get('totalUpdatedCells'))} cells updated.")
+    #print(f"{(result.get('totalUpdatedCells'))} cells updated.")
     return result
   except HttpError as error:
-    print(f"An error occurred: {error}")
+    #print(f"An error occurred: {error}")
     return error
 
 
@@ -119,7 +119,7 @@ def write_to_ssf(batch_data,test_data, ssf_sheetID, test_log_sheetID, row_num=11
        special_instructions = "Refer to attached specification sheet & supplier COA"
     else:
        special_instructions = "Refer to attached specification sheet & supplier COA / PROBIOTIC"
-    print(test_data.rm_fg)
+    #print(test_data.rm_fg)
     if test_data.rm_fg:
        sample_type = "RM"
     else:
@@ -171,11 +171,11 @@ def write_to_ssf(batch_data,test_data, ssf_sheetID, test_log_sheetID, row_num=11
           .batchUpdate(spreadsheetId=ssf_sheetID, body=body)
           .execute()
       )
-      print(f"{(result.get('totalUpdatedCells'))} cells updated.")
+      #print(f"{(result.get('totalUpdatedCells'))} cells updated.")
       if not blank: update_test_log(batch_data,test_data,test_log_sheetID)
       return result
     except HttpError as error:
-      print(f"An error occurred: {error}")
+      #print(f"An error occurred: {error}")
       return error
 
 def open_test_data_sheet(filename):
@@ -238,7 +238,7 @@ def update_test_log(batch_data, test_data, sheetID):
     value_input_option = "USER_ENTERED"
     test_name = test_data.standard_request
 
-    
+    if batch_data.type_material == 'F': return #suppress sheet updates for finished goods TODO: update to update finished goods
     range_name = "2026 Raw Material Testing"
     creds = None
     if os.path.exists("sheetstoken.json"):
@@ -302,10 +302,10 @@ def update_test_log(batch_data, test_data, sheetID):
            ) 
            .execute() 
       )
-      print(f"{(result.get('totalUpdatedCells'))} cells updated.")
+      #print(f"{(result.get('totalUpdatedCells'))} cells updated.")
       return result
     except HttpError as error:
-      print(f"An error occurred: {error}")
+      #print(f"An error occurred: {error}")
       return error
 
 def cache_test_log(sheetID):
@@ -341,5 +341,5 @@ def cache_test_log(sheetID):
     
       return result
     except HttpError as error:
-      print(f"An error occurred: {error}")
+      #print(f"An error occurred: {error}")
       return error

@@ -2474,7 +2474,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
        if isinstance(cache, str):
           logger.error(cache)
        elif isinstance(cache,list):
-          #print(cache)
+
           self.cached_skip_values = cache
        else:
           logger.error("Error in caching skip values")
@@ -2531,27 +2531,37 @@ class MyApp(QMainWindow, Ui_QCRelease):
               skip_data = "Not Found"
               
               column = None
-              try:
-               if batch.type_material == 'R':
+              b = None
+              if batch.type_material == 'R':
                 column2 = batch.vendor
-                id = batch.batchID
-               elif batch.type_material == 'F':
+                bid = batch.batchID
+                ingid = batch.ingredientID
+              elif batch.type_material == 'F':
                   column2 = batch.ingredientID
-                  id = batch.batchID[5:12]
+                  bid = batch.batchID[5:12]
+                  ingid = batch.ingredientID[-4:]
+
+
+              try:
+
+               
                for entry in self.cached_skip_values:
-                    print(entry)
-                    if entry[2] == batch.ingredientID and entry[3] == column2:
+                    if not entry: continue
+
+                    
+                    if entry[2] == ingid and entry[3] == column2:
                        i = 0
-                       for id in entry:
-                          print(id)
-                          if id == batch.batchID:
-                           column = i
-                           break
+                       for b in entry:
+
+                          if bid == b:
+                            column = i
+                            break
                           i += 1  
               except Exception as e:
                  logger.error(e)
                  
               try:
+                
                 skip_data = skip_value_by_column(column)
               except Exception as e:
                   logger.error(e)
@@ -3032,7 +3042,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
            return
         batch_data.print_data()
         self.batches_searched.append([batchID + " ",batch_data.ingredientID + " ","FOUND SUCCESSFULLY"])
-        pyperclip.copy(batch_data.ingredientID + " " + batch_data.batchID + " " + todays_date())
+        if type_material != 'F': pyperclip.copy(batch_data.ingredientID + " " + batch_data.batchID + " " + todays_date())
         batch_data.type_material = type_material
         self.most_recent_request = batch_data
         self.write_batch_to_file()

@@ -55,7 +55,7 @@ def convert_between_date_formats(date):
 
 def skip_value_by_column(column):
     test_columns = [11,14,18,23]
-    if column > 23 or (column > 10 and column not in test_columns):
+    if column > 23 or (column >= 10 and column not in test_columns):
         return True
     if column in test_columns or column < 10:
         return False
