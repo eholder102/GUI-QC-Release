@@ -55,7 +55,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 from pathlib import Path
 
-APP_VERSION = "1.5.8"
+APP_VERSION = "1.6.0"
 APP_DIR = Path(__file__).resolve().parent
 #my_path_to_label_opener = "C:/Program Files/Google/Chrome/Application/chrome.exe"
 def create_config():
@@ -379,8 +379,8 @@ class search_sheet_worker(QObject):
                mime_type = "application/pdf"
             #print(mime_type)
             query = (
-            f"name contains '{ingredientID}'"
-            f"and mimeType = '{mime_type}'"
+            f"name contains '{ingredientID}' "
+            f"and mimeType = '{mime_type}' "
             "and trashed = false"
             )  
 
@@ -537,7 +537,8 @@ class ReportWorker(QThread):
         sheetID,
         overall_sle_data,
         output_path,
-        sle_changes
+        sle_changes,
+        report_type = 'R'
     ):
         super().__init__()
 
@@ -551,6 +552,7 @@ class ReportWorker(QThread):
         self.overall_sle_data = overall_sle_data
         self.output_path = output_path
         self.sle_changes = sle_changes
+        self.report_type = report_type
 
     def run(self):
 
@@ -567,9 +569,10 @@ class ReportWorker(QThread):
                 self.pivot_date,
                 self.skip_data,
                 self.test_data,
-                self.sle_changes
+                self.sle_changes,
+                self.report_type
             )
-
+            r.sheetID = self.sheetID
             self.progress.emit(10)
             #r.get_top_25_sle()
             self.progress.emit(20)
@@ -596,7 +599,7 @@ class ReportWorker(QThread):
                 month = months[month_num-2]
                 year = self.pivot_date[6:10]
                 #print(self.pivot_date)
-                date_string = month + " 20" + year
+                date_string = month + " " + year
                 month_year = date_string.upper()
                 #print(month_year)
                 r.get_incoming(self.check_in_data,
@@ -767,9 +770,11 @@ class PDFReport:
 
         self.add_summary_page()
         self.story.append(PageBreak())
-
-        self.add_skip_progress_page()
-        #self.story.append(PageBreak())
+        try:
+            self.add_skip_progress_page()
+            #self.story.append(PageBreak())
+        except Exception as e:
+           logger.exception(e)
 
         self.add_sle_changes_page()
         self.story.append(PageBreak())
@@ -1038,7 +1043,8 @@ class PDFReport:
     # ---------------------------------------------------------
 
     def add_top_25_page(self):
-
+        if self.report.report_type == 'F':
+           return
         self.story.append(
             Paragraph(
                 "Top 25 Ingredients",
@@ -1419,11 +1425,13 @@ class timed_report():
        top_25_sle = {}
 
        def write_total_cost(self):
-          with open(APP_DIR / "prev_cost_estimate.txt",'w') as file:
+          filename = "rm_prev_cost_estimate.txt" if self.report_type == 'R' else "fg_prev_cost_estimate.txt"
+          with open(APP_DIR / filename,'w') as file:
              file.write(str(self.total_cost))
        def read_prev_total_cost(self):
           try:
-            with open(APP_DIR / "prev_cost_estimate.txt",'r') as file:
+            filename = "rm_prev_cost_estimate.txt" if self.report_type == 'R' else "fg_prev_cost_estimate.txt"
+            with open(APP_DIR / filename,'r') as file:
                 self.prev_week_cost = sanitized_to_int(file.read())
           except:
              logger.exception("Error in reading previous week cost")
@@ -1439,7 +1447,7 @@ class timed_report():
           plt.title("TESTING REQUESTS")
           
 
-       def __init__(self,selected_time,pivot_date,skip_data,test_data,sle_changes):
+       def __init__(self,selected_time,pivot_date,skip_data,test_data,sle_changes,report_type = 'R'):
         logger.info(f"--Report initiated for {selected_time}--")
         
         if self.valid_selected_time(selected_time):
@@ -1455,6 +1463,7 @@ class timed_report():
         for ingredient in self.top_25_ingredients:
            self.top_25_data[ingredient] = []
 
+        self.report_type = report_type
         self.unrecieved = []
         self.released = []
         self.duplicate_lots = []
@@ -1568,7 +1577,7 @@ class timed_report():
                  logger.error(e)
               if test_data == 0:
                  logger.info("COULD NOT FIND TEST DATA IN CACHE. RECACHING...")
-                 self.test_data(self.configs['rm_test_request_sheet_ID'])
+                 #self.cache_test_data(self.sheetID)
                  
                 
               i = 0
@@ -1640,11 +1649,25 @@ class timed_report():
           self.sle0_5.append(self.sle4)
           self.sle0_5.append(self.sle5)
                     
-       def get_incoming(self,check_in_data,month):
+       def get_incoming(self,check_in_data,month,recursive_depth = 0):
 
           new_values = []
+          index = month
+          if self.report_type == 'R' and " " in month[-4:]:
+             length = len(month)
+             first_part = month[0:length-2]
+             second_part = month[-2:]
+             index = first_part + "20" + second_part
 
-          for row in check_in_data[month]['values']:
+          if self.report_type == 'F' and recursive_depth == 0: #recurse to pull all probably ifefficient as hell
+             self.get_incoming(check_in_data, month,1)
+             index = 'PROD First Shift 2026'
+          if self.report_type == 'F' and recursive_depth == 1:
+             self.get_incoming(check_in_data,month,2)
+             index = 'PROD Second Shift 2026'
+          if self.report_type == 'F' and recursive_depth == 2:
+             index = 'PROD Powders 2026'             
+          for row in check_in_data[index]['values']:
                 if not row or not str(row[0]).strip():
                     continue
 
@@ -1655,7 +1678,9 @@ class timed_report():
 
                 # Other report types need date filtering
                 try:
-                    if self.check_valid_date(row[13]):
+                    if self.report_type == 'R' and self.check_valid_date(row[13]):
+                        new_values.append(row)
+                    elif self.report_type == 'F' and self.check_valid_date(row[0]):
                         new_values.append(row)
                 except IndexError:
                     # No date available, so add without date checking
@@ -1679,7 +1704,13 @@ class timed_report():
              except:
                 logger.exception("Failed to add ingredient")
              try:
-                if yes_no_to_bool(entry[20]):
+                if  self.report_type == 'R' and yes_no_to_bool(entry[20]):
+                    self.duplicate_lots.append(entry)
+                    check_skip = False
+             except IndexError:
+                 logger.exception("Index Error")
+             try:
+                if self.report_type == 'F' and yes_no_to_bool(entry[8]):
                     self.duplicate_lots.append(entry)
                     check_skip = False
              except IndexError:
@@ -1694,14 +1725,24 @@ class timed_report():
                     self.released.append(entry)
              except IndexError:
                 logger.exception("Index Error")
-             try:
-                sle = self.get_sle_status(entry[1],entry[3],self.skip_data)
-                self.sle_values.append([entry[0],entry[1],entry[3],sle])
-             except:
-                logger.exception("Error in sle values")
+             if self.report_type == 'R':
+                try:
+                    sle = self.get_sle_status(entry[1],entry[3],self.skip_data)
+                    self.sle_values.append([entry[0],entry[1],entry[3],sle])
+                except:
+                    logger.exception("Error in sle values")
+             elif self.report_type == 'F':
+                try:
+                    sle = self.get_sle_status(entry[1][-4:],entry[1][-4:],self.skip_data)
+                    self.sle_values.append([entry[0],entry[1][-4:],entry[1][-4:],sle])
+                except:
+                    logger.exception("Error in sle values")
              try:
                 #print(f"Calling get_skipped on {entry[0]} {entry[1]}")
-                if check_skip and self.get_skipped(entry[1],entry[3],entry[0]):
+                if check_skip and self.report_type == 'R' and self.get_skipped(entry[1],entry[3],entry[0]):
+                        if entry not in self.sle_skips:
+                            self.sle_skips.append(entry)
+                elif check_skip and self.report_type == 'F' and self.get_skipped(entry[1][-4:],entry[1][-4:],entry[5][-7:]):
                         if entry not in self.sle_skips:
                             self.sle_skips.append(entry)
              
@@ -1727,14 +1768,24 @@ class timed_report():
               skip = "Not Found"
               
               column = None
-              #print(f"Checking {batchID} {ingredientID}")
-              
+              #print(f"Checking {vendor} {ingredientID}")
+
               for entry in self.skip_data:
+                 
                  try: 
                     if len(entry) < 4:
                         continue  
                     
-                    if entry[2] == ingredientID and entry[3] == vendor:
+                    if self.report_type == 'R' and entry[2] == ingredientID and entry[3] == vendor:
+                       i = 0
+                       for id in entry:
+                          
+                          if id == batchID:
+                           column = i
+                           break
+                          i += 1  
+                
+                    if self.report_type == 'F' and entry[2] == ingredientID and entry[3] == vendor:
                        i = 0
                        for id in entry:
                           
@@ -1758,8 +1809,15 @@ class timed_report():
               else: return skip
 
        def get_top_25_sle(self):
-        with open("sles.json", "r") as f:
+        if self.report_type == 'R':
+           file = APP_DIR / "rm_sles.json"
+        elif self.report_type == 'F':
+           file = APP_DIR / "fg_sles.json"
+           return
+        else: return
+        with open(file, "r") as f:
             self.top_25_sle_data = json.load(f)
+
 
         for ingredient in self.top_25_ingredients:
 
@@ -1768,20 +1826,24 @@ class timed_report():
             try:
 
                 ingredient_id = ingredient.strip().upper()
+
                 sle_values = []
+
 
                 for key, value in self.top_25_sle_data.items():
 
                     key = key.replace("\r", "").replace("\n", "").strip().upper()
 
                     # Get ingredient ID from beginning of key
-                    key_ingredient = key.split()[0]
+                    key_ingredient = key.split()
 
-                    if key_ingredient == ingredient_id:
+
+                    if key_ingredient and key_ingredient[0] == ingredient_id:
+
                         sle_values.append(int(value))
-
                 if sle_values:
                     sle = max(sle_values)
+
 
                 self.top_25_data[ingredient] = [
                     ["", f"SLE STATUS: {sle}"]
@@ -1819,8 +1881,12 @@ class timed_report():
           total_sle = sum(len(group) for group in self.sle0_5)
           for i in range(6):
              #print(self.sle0_5)
-             self.sle_graph_values.append(len(self.sle0_5[i]))
-             self.percent_at_sle_x.append(round(len(self.sle0_5[i])/total_sle*100,2)) #TODO: account for duplicate ingredients
+             try:
+                self.sle_graph_values.append(len(self.sle0_5[i]))
+                self.percent_at_sle_x.append(round(len(self.sle0_5[i])/total_sle*100,2)) #TODO: account for duplicate ingredients
+             except Exception as e:
+                logger.exception(e)
+
          
 
           logger.info("SELECTED TIME")
@@ -1835,15 +1901,21 @@ class timed_report():
           logger.info(f"#SLE Skips: {len(self.sle_skips)}")
           logger.info(f"#Total: {len(self.incoming['values'])}")
           logger.info(f"Total Estimated Cost Of Tests: {self.total_cost}")
-          logger.info(f"PERCENT SLE 0: {self.percent_at_sle_x[0]}%, 1: {self.percent_at_sle_x[1]}%, 2: {self.percent_at_sle_x[2]}%, 3: {self.percent_at_sle_x[3]}%, 4: {self.percent_at_sle_x[4]}%, 5: {self.percent_at_sle_x[5]}%,")
+          try:
+            logger.info(f"PERCENT SLE 0: {self.percent_at_sle_x[0]}%, 1: {self.percent_at_sle_x[1]}%, 2: {self.percent_at_sle_x[2]}%, 3: {self.percent_at_sle_x[3]}%, 4: {self.percent_at_sle_x[4]}%, 5: {self.percent_at_sle_x[5]}%,")
+          except Exception as e:
+             logger.exception(e)
           logger.info("TOP 25 INGREDIENTS RECEIVED")
           logger.info(self.top_25_data)
           logger.info("INCOMING INGREDIENTS")
           logger.info(self.incoming_ingredients)
           logger.info("OVERALL SLE")
           logger.info(self.overall_sle_values)
-          self.sle_pie_chart(self.sle_graph_values)
-          self.sle_pie_chart(self.overall_sle_values)
+          try:
+            self.sle_pie_chart(self.sle_graph_values)
+            self.sle_pie_chart(self.overall_sle_values)
+          except Exception as e:
+             logger.exception(e)
           self.skipped_graph_values = []
           tested = len(self.incoming['values']) - len(self.duplicate_lots) - len(self.sle_skips)
           logger.info(f"Incoming: {len(self.incoming['values'])}")
@@ -1853,7 +1925,10 @@ class timed_report():
           self.skipped_graph_values.append(tested)
           self.skipped_graph_values.append(len(self.sle_skips))
           self.skipped_graph_values.append(len(self.duplicate_lots))
-          self.skipped_pie_chart(self.skipped_graph_values)
+          try:
+            self.skipped_pie_chart(self.skipped_graph_values)
+          except Exception as e:
+             logger.exception(e)
 class MyApp(QMainWindow, Ui_QCRelease):
 
     most_recent_request = None
@@ -1886,7 +1961,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
     routine_micros_price = 55
 
     #timed report variables
-    selected_date_range = ""
+    selected_date_range = "week"
     pivot_date = str(todays_date())
 
     changes = {}
@@ -1929,6 +2004,8 @@ class MyApp(QMainWindow, Ui_QCRelease):
         self.rm_button.toggled.connect(lambda: self.select_rm_fg(True))
         self.fg_button.toggled.connect(lambda: self.select_rm_fg(False))
         self.rm_button.setChecked(True)
+        self.weekButton.setChecked(True)
+
 
        
     def select_rm_fg(self,rm): #rm is true fg is false
@@ -2162,12 +2239,17 @@ class MyApp(QMainWindow, Ui_QCRelease):
        logger.info(self.pivot_date)
        
        return
-    
+
     def test_report(self):
+        if self.rm_fg: self.rm_report()
+        elif not self.rm_fg: self.fg_report()
+        else: return
+
+    def rm_report(self):
 
         self.cache_test_data_values(self.configs['rm_test_request_sheet_ID'])
         self.cache_skip_values(self.configs['rm_skip_log_ID'])
-        self.find_sle_changes()
+        self.find_sle_changes("rm_sles.json")
         
         self.report_progress_bar.setValue(0)
         if self.selected_date_range == "ytd":
@@ -2266,6 +2348,47 @@ class MyApp(QMainWindow, Ui_QCRelease):
 
         self.report_worker.start()
 
+    def fg_report(self,):
+
+        self.cache_test_data_values(self.configs['fg_test_request_sheet_ID'])
+        self.cache_skip_values(self.configs['fg_skip_log_ID'])
+        self.find_sle_changes("fg_sles.json")
+        
+        self.report_progress_bar.setValue(0)
+        sheets = ["PROD First Shift 2026", "PROD Second Shift 2026", "PROD Powders 2026"]
+        for sheet in sheets:
+            self.cache_check_in_values(self.configs['FG_log_ID'],sheet,'F')
+
+        self.report_worker = ReportWorker(
+        self.selected_date_range,
+        self.pivot_date,
+        self.cached_skip_values,
+        self.cached_test_values,
+        self.cached_FG_log_values,
+        convert_date_to_month_year(todays_date()),
+        self.configs['testing_log_sheet_ID'],
+        get_test_data(
+            self.configs['fg_skip_log_ID'],
+            "SLE Status",
+            "!A25:C30"
+        )['values'],
+        APP_DIR / "Reports" /
+        f"FG_QC_Report_{self.pivot_date.replace('/', '-')}.pdf",
+        self.changes,
+        'F'
+    )
+
+        self.report_worker.progress.connect(self.report_progress_bar.setValue)
+        self.report_worker.finished.connect(lambda file: self.report_finished(APP_DIR / "Reports" /
+                f"FG_QC_Report_{self.pivot_date.replace('/', '-')}.pdf"))
+        self.report_worker.error.connect(
+            lambda error: self.report_error(error)
+        )
+
+        self.report_worker.start()
+
+
+
     def cache_rm_clicked(self):
        try:
         self.cache_check_in_values(self.configs['RM_check_in_sheet_ID'],convert_date_to_month_year(todays_date()),'R')
@@ -2318,7 +2441,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
        logger.info("Saved batch ID " + self.most_recent_request.batchID + " in saved batches")
        return
           
-    def update_sle_data(self):
+    def update_sle_data(self,filename):
      
             sles = {} 
 
@@ -2331,24 +2454,24 @@ class MyApp(QMainWindow, Ui_QCRelease):
                         logger.exception(e)
                         logger.exception("Could not save SLE statuses")
                         continue
-            save_path = APP_DIR / "sles.json"
+            save_path = APP_DIR / filename
             with open(save_path, "w", encoding="utf-8") as file:
                 json.dump(sles, file, indent=4)
         
                 logger.info("SLE STATUSES SAVED")
 
-    def fetch_sle_data(self):
-        if not os.path.exists(APP_DIR / "sles.json"):
+    def fetch_sle_data(self,filename):
+        if not os.path.exists(APP_DIR / filename):
            return {}
-        save_path = APP_DIR / "sles.json"
+        save_path = APP_DIR / filename
 
         with open(save_path, "r", encoding="utf-8") as file:
             sles = json.load(file)  
         return sles
-    def find_sle_changes(self):
-        old_sles = self.fetch_sle_data()
-        self.update_sle_data()
-        new_sles = self.fetch_sle_data()
+    def find_sle_changes(self,filename):
+        old_sles = self.fetch_sle_data(filename)
+        self.update_sle_data(filename)
+        new_sles = self.fetch_sle_data(filename)
         changed_sles = {}
 
         for key in old_sles.keys() | new_sles.keys():
@@ -3292,7 +3415,7 @@ if __name__ == "__main__":
     logging.getLogger("googleapiclient").setLevel(logging.INFO)
     logging.getLogger("googleapiclient.discovery").setLevel(logging.INFO)
     logging.getLogger("googleapiclient.discovery").setLevel(logging.INFO)
-    logging.getLogger("matplotlib.pyplot").setLevel(logging.WARNING)
+    logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
 
     logger.debug(
