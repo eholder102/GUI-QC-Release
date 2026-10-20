@@ -55,7 +55,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 from pathlib import Path
 
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.6.1"
 APP_DIR = Path(__file__).resolve().parent
 #my_path_to_label_opener = "C:/Program Files/Google/Chrome/Application/chrome.exe"
 def create_config():
@@ -3132,15 +3132,17 @@ class MyApp(QMainWindow, Ui_QCRelease):
                             if not ok or not date:
                              logger.info("USER CANCELLED LABEL REQUEST")
                              return 0
-                            month = convert_date_to_month_year(date)
+
                 
                             
                     except Exception as e:
                         logger.exception(str(e))
                         self.show_error("ERROR IN INPUT")
-                        return
-                
+                    return
+                month = convert_date_to_month_year(date)
+                print(month)
             elif type_material == 'F': 
+
                sheets = ["PROD First Shift 2026", "PROD Second Shift 2026", "PROD Powders 2026"]
                for sheet in sheets:
                   self.cache_check_in_values(sheetID,sheet,type_material)
