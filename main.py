@@ -55,7 +55,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 from pathlib import Path
 
-APP_VERSION = "1.6.1"
+APP_VERSION = "1.6.2"
 APP_DIR = Path(__file__).resolve().parent
 #my_path_to_label_opener = "C:/Program Files/Google/Chrome/Application/chrome.exe"
 def create_config():
@@ -3310,7 +3310,7 @@ class MyApp(QMainWindow, Ui_QCRelease):
               continue
           arl_brands = ['ROS','KLO','ALE']
           #print(batch.vendor)
-          if batch.vendor in arl_brands or not data.routine_micros:
+          if  not data.rm_fg and (batch.vendor in arl_brands or not data.routine_micros):
               self.tests_requested.append([batch.batchID + " " + batch.ingredientID + " ", "SEND TO ARL"])
               logger.info("BATCH ID: " + batch.batchID + " SKIPPED, SEND TO ARL")
               self.show_error("BATCH ID: " + batch.batchID + " SKIPPED, MUST BE SENT TO ARL")
