@@ -2826,7 +2826,13 @@ class MyApp(QMainWindow, Ui_QCRelease):
                          return 0
                    case 'P': #component
                       try:
-                       data = raw_material_data(batchID=raw_material_info[0],ingredientID=raw_material_info[1],ingredient_name=raw_material_info[2],vendor=raw_material_info[3],vendor_lot_num=raw_material_info[4],PO_num=raw_material_info[5],expiration_date=raw_material_info[7], num_of_containers=raw_material_info[8],row=row)
+                       #added backwards compatibility for before and after SS column
+                       old_format_months = ["JANUARY 2026","FEBRUARY 2026","MARCH 2026","APRIL 2026","MAY 2026","JUNE 2026","JULY 2026","AUGUST 2026","SEPTEMBER 2026"]
+                       if month in old_format_months:
+                          po = raw_material_info[5]
+                       else:
+                          po = raw_material_info[6]
+                       data = raw_material_data(batchID=raw_material_info[0],ingredientID=raw_material_info[1],ingredient_name=raw_material_info[2],vendor=raw_material_info[3],vendor_lot_num=raw_material_info[4],PO_num=po,expiration_date=raw_material_info[7], num_of_containers=raw_material_info[8],row=row)
                       except Exception as e:
                         logger.debug(e)
                         return 0
