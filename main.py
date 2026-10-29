@@ -55,7 +55,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 from pathlib import Path
 
-APP_VERSION = "1.6.2"
+APP_VERSION = "1.6.3"
 APP_DIR = Path(__file__).resolve().parent
 #my_path_to_label_opener = "C:/Program Files/Google/Chrome/Application/chrome.exe"
 def create_config():
